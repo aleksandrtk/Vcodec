@@ -114,7 +114,7 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
                 .padding(padding)
         ) {
             when (selectedTab) {
-                0 -> ScannerScreen(viewModel)
+                0 -> ScannerScreen(viewModel, onNavigateToQueue = { selectedTab = 1 })
                 1 -> QueueScreen(viewModel)
                 2 -> HistoryScreen(viewModel)
             }
@@ -123,12 +123,18 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
 }
 
 @Composable
-fun ScannerScreen(viewModel: MainViewModel) {
+fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
     val context = LocalContext.current
     val folderUri by viewModel.selectedFolderUri.collectAsState()
     val folderName by viewModel.selectedFolderName.collectAsState()
     val scannedFiles by viewModel.scannedFiles.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
+
+    val targetCodec by viewModel.targetCodec.collectAsState()
+    val targetResolution by viewModel.targetResolution.collectAsState()
+    val qualityPreset by viewModel.qualityPreset.collectAsState()
+    val customBitrateMbps by viewModel.customBitrateMbps.collectAsState()
+    val keepOriginal by viewModel.keepOriginal.collectAsState()
 
     val openFolderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -144,9 +150,12 @@ fun ScannerScreen(viewModel: MainViewModel) {
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         if (uris.isNotEmpty()) {
-            // Automatically add to queue without asking for destination folder
-            // The worker will save it next to the original via MediaStore RELATIVE_PATH
-            viewModel.addVideosFromPicker(uris, null)
+            if (scannedFiles.isEmpty()) {
+                viewModel.addVideosFromPickerDirectlyToQueue(uris)
+                onNavigateToQueue()
+            } else {
+                viewModel.addVideosFromPicker(uris, null)
+            }
         }
     }
 
@@ -155,6 +164,164 @@ fun ScannerScreen(viewModel: MainViewModel) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
+        // COMPRESSION SETTINGS (Always visible at the top)
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = CardDefaults.cardColors(containerColor = DarkSurface),
+            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f))
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    "COMPRESSION SETTINGS",
+                    color = PrimaryCyan,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+
+                // 1. Codec choice
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Target Codec", color = TextWhite, fontSize = 14.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("HEVC", "H.264").forEach { codec ->
+                            val isSelected = targetCodec == codec
+                            SuggestionChip(
+                                onClick = { viewModel.setTargetCodec(codec) },
+                                label = { Text(codec) },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                    labelColor = if (isSelected) PrimaryCyan else TextGray
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // 2. Resolution choice
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Resolution", color = TextWhite, fontSize = 14.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf("Original", "1080p", "720p").forEach { res ->
+                            val isSelected = targetResolution == res
+                            SuggestionChip(
+                                onClick = { viewModel.setTargetResolution(res) },
+                                label = { Text(res) },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                    labelColor = if (isSelected) PrimaryCyan else TextGray
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // 3. Quality Preset choice
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Preset", color = TextWhite, fontSize = 14.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            mapOf(
+                                "SMART" to "Smart",
+                                "HIGH_QUALITY" to "Quality",
+                                "MAX_COMPRESSION" to "Space",
+                                "CUSTOM" to "Custom"
+                            ).forEach { (preset, labelText) ->
+                                val isSelected = qualityPreset == preset
+                                SuggestionChip(
+                                    onClick = { viewModel.setQualityPreset(preset) },
+                                    label = { Text(labelText) },
+                                    colors = SuggestionChipDefaults.suggestionChipColors(
+                                        containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                        labelColor = if (isSelected) PrimaryCyan else TextGray
+                                    )
+                                )
+                            }
+                        }
+                    }
+                    val presetDescription = when (qualityPreset) {
+                        "HIGH_QUALITY" -> "Quality: Keeps maximum detail, slightly larger size."
+                        "MAX_COMPRESSION" -> "Space: Saves maximum storage, lower bitrate."
+                        "CUSTOM" -> "Custom: Manually specify the target video encoding bitrate."
+                        else -> "Smart: Recommended balance of size & visual quality."
+                    }
+                    Text(
+                        presetDescription,
+                        color = TextGray,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+
+                    if (qualityPreset == "CUSTOM") {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text("Target Bitrate", color = TextWhite, fontSize = 14.sp)
+                                Text(
+                                    text = String.format(java.util.Locale.US, "%.1f Mbps", customBitrateMbps),
+                                    color = PrimaryCyan,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Slider(
+                                value = customBitrateMbps,
+                                onValueChange = { viewModel.setCustomBitrateMbps(it) },
+                                valueRange = 0.5f..30.0f,
+                                colors = SliderDefaults.colors(
+                                    thumbColor = PrimaryCyan,
+                                    activeTrackColor = PrimaryCyan,
+                                    inactiveTrackColor = Color.Gray.copy(alpha = 0.24f)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+                }
+
+                // 4. Output Mode choice (Save Copy vs Replace Original)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Output Mode", color = TextWhite, fontSize = 14.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        listOf(true to "Save Copy", false to "Replace").forEach { (keep, labelText) ->
+                            val isSelected = keepOriginal == keep
+                            SuggestionChip(
+                                onClick = { viewModel.setKeepOriginal(keep) },
+                                label = { Text(labelText) },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                    labelColor = if (isSelected) PrimaryCyan else TextGray
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         // Folder selection card with premium glassmorphism styling
         Card(
             modifier = Modifier.fillMaxWidth(),
@@ -371,7 +538,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
                 }
             }
 
-             LazyColumn(
+            LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .padding(vertical = 8.dp),
@@ -441,150 +608,26 @@ fun ScannerScreen(viewModel: MainViewModel) {
 
             val selectedCount = scannedFiles.count { it.isSelected }
 
-            // Settings Panel Card
             if (selectedCount > 0) {
-                val targetCodec by viewModel.targetCodec.collectAsState()
-                val targetResolution by viewModel.targetResolution.collectAsState()
-                val qualityPreset by viewModel.qualityPreset.collectAsState()
-
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f))
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { viewModel.addSelectedToQueue() },
+                    enabled = selectedCount > 0,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(50.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryCyan,
+                        disabledContainerColor = DarkSurface
+                    )
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            "COMPRESSION SETTINGS",
-                            color = PrimaryCyan,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp,
-                            modifier = Modifier.padding(bottom = 12.dp)
-                        )
-
-                        // 1. Codec choice
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Target Codec", color = TextWhite, fontSize = 14.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                listOf("HEVC", "H.264").forEach { codec ->
-                                    val isSelected = targetCodec == codec
-                                    SuggestionChip(
-                                        onClick = { viewModel.setTargetCodec(codec) },
-                                        label = { Text(codec) },
-                                        colors = SuggestionChipDefaults.suggestionChipColors(
-                                            containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                            labelColor = if (isSelected) PrimaryCyan else TextGray
-                                        )
-                                    )
-                                }
-                            }
-                        }
-
-                        // 2. Resolution choice
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Resolution", color = TextWhite, fontSize = 14.sp)
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                listOf("Original", "1080p", "720p").forEach { res ->
-                                    val isSelected = targetResolution == res
-                                    SuggestionChip(
-                                        onClick = { viewModel.setTargetResolution(res) },
-                                        label = { Text(res) },
-                                        colors = SuggestionChipDefaults.suggestionChipColors(
-                                            containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                            labelColor = if (isSelected) PrimaryCyan else TextGray
-                                        )
-                                    )
-                                }
-                            }
-                        }
-
-                        // 3. Quality Preset choice
-                        Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Preset", color = TextWhite, fontSize = 14.sp)
-                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    mapOf("SMART" to "Smart", "HIGH_QUALITY" to "Quality", "MAX_COMPRESSION" to "Space").forEach { (preset, labelText) ->
-                                        val isSelected = qualityPreset == preset
-                                        SuggestionChip(
-                                            onClick = { viewModel.setQualityPreset(preset) },
-                                            label = { Text(labelText) },
-                                            colors = SuggestionChipDefaults.suggestionChipColors(
-                                                containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                                labelColor = if (isSelected) PrimaryCyan else TextGray
-                                            )
-                                        )
-                                    }
-                                }
-                            }
-                            val presetDescription = when (qualityPreset) {
-                                "HIGH_QUALITY" -> "Quality: Keeps maximum detail, slightly larger size."
-                                "MAX_COMPRESSION" -> "Space: Saves maximum storage, lower bitrate."
-                                else -> "Smart: Recommended balance of size & visual quality."
-                            }
-                            Text(
-                                presetDescription,
-                                color = TextGray,
-                                fontSize = 11.sp,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
-
-                        // 4. Output Mode choice (Save Copy vs Replace Original)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text("Output Mode", color = TextWhite, fontSize = 14.sp)
-                            val keepOriginal by viewModel.keepOriginal.collectAsState()
-                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                listOf(true to "Save Copy", false to "Replace").forEach { (keep, labelText) ->
-                                    val isSelected = keepOriginal == keep
-                                    SuggestionChip(
-                                        onClick = { viewModel.setKeepOriginal(keep) },
-                                        label = { Text(labelText) },
-                                        colors = SuggestionChipDefaults.suggestionChipColors(
-                                            containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                            labelColor = if (isSelected) PrimaryCyan else TextGray
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    Text(
+                        "Add $selectedCount to Queue",
+                        color = if (selectedCount > 0) Color.Black else TextGray,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
                 }
-            }
-
-            Button(
-                onClick = { viewModel.addSelectedToQueue() },
-                enabled = selectedCount > 0,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = PrimaryCyan,
-                    disabledContainerColor = DarkSurface
-                )
-            ) {
-                Text(
-                    "Add $selectedCount to Queue",
-                    color = if (selectedCount > 0) Color.Black else TextGray,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
             }
         }
     }
@@ -791,7 +834,7 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context) {
                 )
                 if (task.status == TaskStatus.PROCESSING && task.targetBitrate > 0) {
                     Text(
-                        "Target: H.265 @ ${(task.targetBitrate / 1_000_000.0).format(1)} Mbps",
+                        "Target: ${task.targetCodec} @ ${(task.targetBitrate / 1_000_000.0).format(1)} Mbps",
                         color = TextGray,
                         fontSize = 12.sp
                     )

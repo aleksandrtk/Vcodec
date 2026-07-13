@@ -184,12 +184,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _qualityPreset = MutableStateFlow("SMART")
     val qualityPreset: StateFlow<String> = _qualityPreset.asStateFlow()
 
+    private val _customBitrateMbps = MutableStateFlow(2.0f)
+    val customBitrateMbps: StateFlow<Float> = _customBitrateMbps.asStateFlow()
+
     private val _keepOriginal = MutableStateFlow(true)
     val keepOriginal: StateFlow<Boolean> = _keepOriginal.asStateFlow()
 
     fun setTargetCodec(codec: String) { _targetCodec.value = codec }
     fun setTargetResolution(res: String) { _targetResolution.value = res }
     fun setQualityPreset(preset: String) { _qualityPreset.value = preset }
+    fun setCustomBitrateMbps(bitrate: Float) { _customBitrateMbps.value = bitrate }
     fun setKeepOriginal(keep: Boolean) { _keepOriginal.value = keep }
 
     fun startQueue() {
@@ -228,6 +232,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     targetHeight = 0,
                     targetResolution = res,
                     qualityPreset = preset,
+                    targetBitrate = if (preset == "CUSTOM") (_customBitrateMbps.value * 1_000_000).toInt() else 0,
                     keepOriginal = keepOrig
                 )
                 repository.addTask(newTask)
@@ -321,6 +326,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _selectedFolderName.value = "📂 ${folderDoc?.name ?: "Destination"} (${newFiles.size} videos)"
                 } else {
                     _selectedFolderName.value = "Gallery Selection (${newFiles.size} videos)"
+                }
+            }
+        }
+    }
+
+    fun addVideosFromPickerDirectlyToQueue(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val context: Context = getApplication()
+                val codec = _targetCodec.value
+                val res = _targetResolution.value
+                val preset = _qualityPreset.value
+                val keepOrig = _keepOriginal.value
+                val customBitrate = if (preset == "CUSTOM") (_customBitrateMbps.value * 1_000_000).toInt() else 0
+
+                for (uri in uris) {
+                    try {
+                        val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                    } catch (_: SecurityException) {
+                        try {
+                            context.contentResolver.takePersistableUriPermission(
+                                uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        } catch (_: SecurityException) {}
+                    }
+
+                    var name = "video.mp4"
+                    var size = 0L
+                    try {
+                        context.contentResolver.query(
+                            uri,
+                            arrayOf(
+                                android.provider.OpenableColumns.DISPLAY_NAME, 
+                                android.provider.OpenableColumns.SIZE
+                            ),
+                            null, null, null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                name = cursor.getString(0) ?: "video.mp4"
+                                size = cursor.getLong(1)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to query URI metadata: ${e.message}")
+                    }
+
+                    val newTask = TranscodeTask(
+                        sourceUri = uri.toString(),
+                        sourcePath = null,
+                        destUri = null,
+                        destPath = null,
+                        fileName = name,
+                        originalSize = size,
+                        status = TaskStatus.PENDING,
+                        targetCodec = codec,
+                        targetWidth = 0,
+                        targetHeight = 0,
+                        targetResolution = res,
+                        qualityPreset = preset,
+                        targetBitrate = customBitrate,
+                        keepOriginal = keepOrig
+                    )
+                    repository.addTask(newTask)
                 }
             }
         }

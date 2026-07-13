@@ -88,6 +88,7 @@ class VideoTranscodeWorker(
             val calculatedTargetBitrate = when (currentTask.qualityPreset) {
                 "HIGH_QUALITY" -> (suggestedBase * 1.5).toInt().coerceAtMost((videoInfo.bitRate * 0.9).toInt())
                 "MAX_COMPRESSION" -> (suggestedBase * 0.6).toInt().coerceAtLeast(500_000)
+                "CUSTOM" -> if (currentTask.targetBitrate > 0) currentTask.targetBitrate else suggestedBase
                 else -> suggestedBase // SMART
             }
 
