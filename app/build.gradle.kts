@@ -23,7 +23,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17")
-                abiFilters("arm64-v8a") // Optimized for modern Samsung S21 & S24 (both arm64)
+                abiFilters("arm64-v8a", "x86_64", "armeabi-v7a", "x86") // Broad ABI support (Samsung devices, emulators, etc.)
             }
         }
     }

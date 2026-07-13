@@ -35,7 +35,7 @@ class TaskRepository(private val context: Context) {
 
     suspend fun pauseTask(taskId: Long) {
         val task = taskDao.getTaskById(taskId)
-        if (task != null && task.status == TaskStatus.PENDING) {
+        if (task != null && (task.status == TaskStatus.PENDING || task.status == TaskStatus.PROCESSING || task.status == TaskStatus.ANALYZING)) {
             taskDao.updateTask(task.copy(status = TaskStatus.PAUSED))
         }
     }
