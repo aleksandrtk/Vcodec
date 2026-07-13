@@ -307,65 +307,101 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     var name = "video.mp4"
                     var size = 0L
                     var lastModified = 0L
+
+                    // 1. Query Display Name and Size (guaranteed to succeed on all content URIs)
                     try {
                         context.contentResolver.query(
                             uri,
                             arrayOf(
                                 android.provider.OpenableColumns.DISPLAY_NAME, 
-                                android.provider.OpenableColumns.SIZE,
-                                android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED
+                                android.provider.OpenableColumns.SIZE
                             ),
                             null, null, null
                         )?.use { cursor ->
                             if (cursor.moveToFirst()) {
                                 val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
                                 val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
-                                val modIdx = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
-
                                 if (nameIdx != -1) {
                                     name = cursor.getString(nameIdx) ?: "video.mp4"
                                 }
                                 if (sizeIdx != -1) {
                                     size = cursor.getLong(sizeIdx)
                                 }
-                                if (modIdx != -1 && !cursor.isNull(modIdx)) {
-                                    lastModified = cursor.getLong(modIdx)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to query OpenableColumns: ${e.message}")
+                    }
+
+                    // 2. Query Last Modified Date based on URI scheme/authority
+                    try {
+                        val isDocument = android.provider.DocumentsContract.isDocumentUri(context, uri)
+                        if (isDocument) {
+                            // Document URI: query last_modified column
+                            context.contentResolver.query(
+                                uri,
+                                arrayOf(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+                                null, null, null
+                            )?.use { c ->
+                                if (c.moveToFirst()) {
+                                    val idx = c.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                                    if (idx != -1 && !c.isNull(idx)) {
+                                        lastModified = c.getLong(idx)
+                                    }
                                 }
                             }
                         }
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to query URI metadata: ${e.message}")
+                        Log.w(TAG, "Failed to query Document last modified: ${e.message}")
                     }
 
-                    // 2. Critical Fallback: resolve to MediaStore and get DATE_MODIFIED
-                    if (lastModified == 0L) {
+                    // 3. MediaStore Fallback for Name, Date and Size (if size is 0 or lastModified is 0 or name is video.mp4)
+                    if (size == 0L || lastModified == 0L || name == "video.mp4") {
                         try {
-                            val mediaStoreUri = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, uri)
+                            val mediaStoreUri = if (uri.authority == android.provider.MediaStore.AUTHORITY) {
+                                uri
+                            } else {
+                                com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, uri)
+                            }
+
                             if (mediaStoreUri != null) {
                                 context.contentResolver.query(
                                     mediaStoreUri,
                                     arrayOf(
+                                        android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME,
+                                        android.provider.MediaStore.Video.VideoColumns.SIZE,
                                         android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
                                         android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
                                     ),
                                     null, null, null
                                 )?.use { c ->
                                     if (c.moveToFirst()) {
+                                        val nameIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME)
+                                        val sizeIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.SIZE)
                                         val modIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
                                         val addIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
-                                        val sec = when {
-                                            modIdx != -1 && !c.isNull(modIdx) -> c.getLong(modIdx)
-                                            addIdx != -1 && !c.isNull(addIdx) -> c.getLong(addIdx)
-                                            else -> 0L
+
+                                        if ((name == "video.mp4" || name.isEmpty()) && nameIdx != -1) {
+                                            name = c.getString(nameIdx) ?: "video.mp4"
                                         }
-                                        if (sec > 0L) {
-                                            lastModified = sec * 1000L // Convert to ms
+                                        if (size == 0L && sizeIdx != -1) {
+                                            size = c.getLong(sizeIdx)
+                                        }
+                                        if (lastModified == 0L) {
+                                            val sec = when {
+                                                modIdx != -1 && !c.isNull(modIdx) -> c.getLong(modIdx)
+                                                addIdx != -1 && !c.isNull(addIdx) -> c.getLong(addIdx)
+                                                else -> 0L
+                                            }
+                                            if (sec > 0L) {
+                                                lastModified = sec * 1000L
+                                            }
                                         }
                                     }
                                 }
                             }
                         } catch (e: Exception) {
-                            Log.w(TAG, "Failed to resolve lastModified from MediaStore: ${e.message}")
+                            Log.w(TAG, "Failed to resolve metadata fallback from MediaStore: ${e.message}")
                         }
                     }
 
