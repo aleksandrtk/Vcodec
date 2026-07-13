@@ -132,7 +132,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val name = cursor.getString(nameIndex) ?: ""
                         val mimeType = cursor.getString(mimeIndex) ?: ""
                         val size = cursor.getLong(sizeIndex)
-                        val lastModified = if (dateIndex != -1) cursor.getLong(dateIndex) else 0L
+                        var lastModified = if (dateIndex != -1) cursor.getLong(dateIndex) else 0L
+                        if (lastModified == 0L) {
+                            try {
+                                val fileUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                                val resolvedUri = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, fileUri)
+                                if (resolvedUri != null) {
+                                    context.contentResolver.query(
+                                        resolvedUri,
+                                        arrayOf(
+                                            android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
+                                            android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
+                                        ),
+                                        null, null, null
+                                    )?.use { c ->
+                                        if (c.moveToFirst()) {
+                                            val modIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
+                                            val addIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
+                                            val sec = when {
+                                                modIdx != -1 && !c.isNull(modIdx) -> c.getLong(modIdx)
+                                                addIdx != -1 && !c.isNull(addIdx) -> c.getLong(addIdx)
+                                                else -> 0L
+                                            }
+                                            if (sec > 0L) {
+                                                lastModified = sec * 1000L
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        if (lastModified == 0L) {
+                            lastModified = System.currentTimeMillis()
+                        }
 
                         if (mimeType == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
                             scanDirectoryContract(context, treeUri, childId, list)
@@ -286,15 +318,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             null, null, null
                         )?.use { cursor ->
                             if (cursor.moveToFirst()) {
-                                name = cursor.getString(0) ?: "video.mp4"
-                                size = cursor.getLong(1)
-                                if (cursor.columnCount > 2 && !cursor.isNull(2)) {
-                                    lastModified = cursor.getLong(2)
+                                val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                                val modIdx = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+
+                                if (nameIdx != -1) {
+                                    name = cursor.getString(nameIdx) ?: "video.mp4"
+                                }
+                                if (sizeIdx != -1) {
+                                    size = cursor.getLong(sizeIdx)
+                                }
+                                if (modIdx != -1 && !cursor.isNull(modIdx)) {
+                                    lastModified = cursor.getLong(modIdx)
                                 }
                             }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "Failed to query URI metadata: ${e.message}")
+                    }
+
+                    // 2. Critical Fallback: resolve to MediaStore and get DATE_MODIFIED
+                    if (lastModified == 0L) {
+                        try {
+                            val mediaStoreUri = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, uri)
+                            if (mediaStoreUri != null) {
+                                context.contentResolver.query(
+                                    mediaStoreUri,
+                                    arrayOf(
+                                        android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
+                                        android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
+                                    ),
+                                    null, null, null
+                                )?.use { c ->
+                                    if (c.moveToFirst()) {
+                                        val modIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
+                                        val addIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
+                                        val sec = when {
+                                            modIdx != -1 && !c.isNull(modIdx) -> c.getLong(modIdx)
+                                            addIdx != -1 && !c.isNull(addIdx) -> c.getLong(addIdx)
+                                            else -> 0L
+                                        }
+                                        if (sec > 0L) {
+                                            lastModified = sec * 1000L // Convert to ms
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to resolve lastModified from MediaStore: ${e.message}")
+                        }
+                    }
+
+                    if (lastModified == 0L) {
+                        lastModified = System.currentTimeMillis()
                     }
 
                     newFiles.add(

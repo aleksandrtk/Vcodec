@@ -148,7 +148,26 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
 
     // Returns real writable SAF URIs (not Photo Picker sandbox URIs)
     val pickVideosLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
+        contract = object : androidx.activity.result.contract.ActivityResultContract<Unit, List<Uri>>() {
+            override fun createIntent(context: android.content.Context, input: Unit): android.content.Intent {
+                // ACTION_PICK directly opens the default system gallery app (Samsung Gallery on Samsung, Google Photos on Pixel)
+                return android.content.Intent(android.content.Intent.ACTION_PICK, android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI).apply {
+                    putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+            }
+
+            override fun parseResult(resultCode: Int, intent: android.content.Intent?): List<Uri> {
+                if (resultCode != android.app.Activity.RESULT_OK || intent == null) return emptyList()
+                val uris = mutableListOf<Uri>()
+                intent.data?.let { uris.add(it) }
+                intent.clipData?.let { clipData ->
+                    for (i in 0 until clipData.itemCount) {
+                        clipData.getItemAt(i).uri?.let { uris.add(it) }
+                    }
+                }
+                return uris
+            }
+        }
     ) { uris ->
         if (uris.isNotEmpty()) {
             viewModel.addVideosFromPicker(uris, null)
@@ -200,7 +219,7 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                 Spacer(modifier = Modifier.height(32.dp))
 
                 Button(
-                    onClick = { pickVideosLauncher.launch(arrayOf("video/*")) },
+                    onClick = { pickVideosLauncher.launch(Unit) },
                     colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan),
                     shape = RoundedCornerShape(12.dp),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
@@ -271,7 +290,7 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 IconButton(
-                                    onClick = { pickVideosLauncher.launch(arrayOf("video/*")) },
+                                    onClick = { pickVideosLauncher.launch(Unit) },
                                     modifier = Modifier.background(PrimaryCyan.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                                 ) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = "Add from Gallery", tint = PrimaryCyan)
