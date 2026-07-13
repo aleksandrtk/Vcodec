@@ -213,7 +213,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _targetResolution = MutableStateFlow("Original")
     val targetResolution: StateFlow<String> = _targetResolution.asStateFlow()
 
-    private val _qualityPreset = MutableStateFlow("SMART")
+    private val _qualityPreset = MutableStateFlow("HIGH_QUALITY")
     val qualityPreset: StateFlow<String> = _qualityPreset.asStateFlow()
 
     private val _customBitrateMbps = MutableStateFlow(2.0f)

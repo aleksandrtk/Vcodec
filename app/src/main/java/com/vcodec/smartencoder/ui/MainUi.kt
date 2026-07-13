@@ -554,7 +554,6 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
                                     mapOf(
-                                        "SMART" to "Smart",
                                         "HIGH_QUALITY" to "Quality",
                                         "MAX_COMPRESSION" to "Space",
                                         "CUSTOM" to "Custom"
@@ -577,7 +576,7 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                                 "HIGH_QUALITY" -> "Quality: Keeps maximum detail, slightly larger size."
                                 "MAX_COMPRESSION" -> "Space: Saves maximum storage, lower bitrate."
                                 "CUSTOM" -> "Custom: Manually specify the target video encoding bitrate."
-                                else -> "Smart: Recommended balance of size & visual quality."
+                                else -> "Quality: Keeps maximum detail, slightly larger size."
                             }
                             Text(
                                 presetDescription,
@@ -861,9 +860,9 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewMo
                         }
                     )
                     val label = when {
-                        task.cpuTemp > 45.0f -> "Thermal Safety Active"
-                        task.cpuTemp > 40.0f -> "Cooling Device"
-                        else -> "Optimal Temp"
+                        task.cpuTemp > 45.0f -> "Critical Temp"
+                        task.cpuTemp > 40.0f -> "High Temp"
+                        else -> "Normal Temp"
                     }
                     Box(
                         modifier = Modifier

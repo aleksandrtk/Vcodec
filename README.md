@@ -22,7 +22,7 @@ The application is deeply optimized for mobile system-on-chip (SoC) media pipeli
 * ⚡ **Dimensity 9300 / 9200 / 9000** (e.g., Xiaomi 13T Pro, OnePlus Pad) — Advanced hardware media engine optimization to fully utilize multi-core encoding pipelines.
 
 ### 🌡️ Thermal Monitoring & Telemetry
-Video encoding is a computationally intensive process that puts continuous load on the CPU and GPU. VCodec monitors the system thermal state in real-time by reading `/sys/class/thermal` sensors and displays live telemetry inside the UI (warning colors indicate when the device is heating up). Active encoding is never forcefully throttled or paused by the application itself; instead, the application relies on the OS kernel's native thermal throttling to manage hardware safety, ensuring uninterrupted and predictable background queue progression.
+Video encoding is a computationally intensive process that puts continuous load on the CPU and GPU. VCodec monitors the system thermal state in real-time by reading `/sys/class/thermal` sensors and displays live temperature telemetry inside the UI. This provides passive diagnostics, helping users monitor hardware heat during intensive queue compression.
 
 ---
 

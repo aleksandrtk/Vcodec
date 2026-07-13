@@ -22,7 +22,7 @@ The **Smart Encoder** is structured around a sequential, automated queue. The pr
 ## 3. Engineering Compromises & Architecture Trade-offs
 
 ### 3.1 Hardware vs. Software Encoding Quality (MediaCodec vs. x265)
-* **Compromise**: Hardware encoders on Qualcomm chipsets (`OMX.qcom.video.encoder.hevc` or `c2.qti.hevc.encoder`) prioritize encoding speed and battery efficiency over mathematical compression density. Software encoders like `x265` produce slightly smaller file sizes at matching quality levels, but run extremely slow on mobile CPUs (2-5 FPS vs 60-120 FPS on S24 Ultra), which causes rapid battery depletion and heavy thermal throttling.
+* **Compromise**: Hardware encoders on Qualcomm chipsets (`OMX.qcom.video.encoder.hevc` or `c2.qti.hevc.encoder`) prioritize encoding speed and battery efficiency over mathematical compression density. Software encoders like `x265` produce slightly smaller file sizes at matching quality levels, but run extremely slow on mobile CPUs (2-5 FPS vs 60-120 FPS on S24 Ultra), which causes rapid battery depletion and heavy hardware heating.
 * **Resolution**: The app uses hardware acceleration exclusively for transcoding. To bridge the quality gap, it performs the **pre-analysis pass** to estimate motion and detail levels, setting optimized target bitrates dynamically rather than using generic static presets.
 
 ### 3.2 Metadata Extraction (NDK Post-Process vs. FFmpeg Muxer)
@@ -41,9 +41,9 @@ The **Smart Encoder** is structured around a sequential, automated queue. The pr
 * **Compromise**: Calculating VMAF (Video Multi-Method Assessment Fusion) on-device requires massive CPU processing, causing lag and overheating.
 * **Resolution**: The application calculates **Structural Similarity (SSIM)** or **PSNR** on 10-second sample transcodes in C++ to approximate quality scores, rather than running a full, heavy VMAF model on the phone.
 
-### 3.5 Queue Control vs. Automatic Thermal Throttling
-* **Compromise**: Snapdragon 888 and 8 Gen 3 manage thermal throttling at the kernel level.
-* **Trade-off**: Implementing an active thermal throttle in our application queue (e.g. pausing compression if CPU exceeds 45°C) would slow down overnight batch compression and frustrate users.
+### 3.5 Queue Control vs. Passive Temperature Telemetry
+* **Compromise**: Snapdragon 888 and 8 Gen 3 manage thermal states at the kernel level.
+* **Trade-off**: Implementing active temperature control inside the app (like automatically pausing queue processing when hot) would interrupt overnight batch compression and create a bad user experience.
 * **Resolution**: The application lets the operating system manage hardware temperatures. The UI focuses on displaying telemetry data and flags warning colors if temperature values are high.
 
 ### 3.6 MediaStore Date Synchronization under Scoped Storage

@@ -40,6 +40,6 @@ data class TranscodeTask(
     val targetWidth: Int = 0,
     val targetHeight: Int = 0,
     val targetResolution: String = "Original",
-    val qualityPreset: String = "SMART",
+    val qualityPreset: String = "HIGH_QUALITY",
     val keepOriginal: Boolean = true
 )
