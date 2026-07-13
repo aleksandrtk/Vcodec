@@ -19,7 +19,8 @@ object MediaStorageManager {
         keepOriginal: Boolean,
         fileName: String,
         originalDates: MetadataRestorer.FileDates?,
-        exactName: Boolean = false
+        exactName: Boolean = false,
+        sourcePath: String? = null
     ): Uri? {
         if (!keepOriginal && !exactName) {
             return sourceUri
@@ -29,7 +30,9 @@ object MediaStorageManager {
         val ext = fileName.substringAfterLast(".")
         val targetName = if (exactName) fileName else "${baseName}_compressed.$ext"
 
-        val rawPath = MetadataRestorer.extractRelativePathFromMediaStore(context, sourceUri) ?: "Movies/SmartEncoder"
+        val rawPath = if (!sourcePath.isNullOrEmpty()) sourcePath else {
+            MetadataRestorer.extractRelativePathFromMediaStore(context, sourceUri) ?: "Movies/SmartEncoder"
+        }
         val allowedDirectories = listOf("Movies", "DCIM", "Pictures", "Download")
         val cleanPath = rawPath.trim('/')
         val primaryDir = cleanPath.substringBefore('/')

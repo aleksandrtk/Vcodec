@@ -10,6 +10,8 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -144,19 +146,39 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
         }
     }
 
-    // Step 1: Open Document picker — uses Samsung Gallery / system file picker
     // Returns real writable SAF URIs (not Photo Picker sandbox URIs)
     val pickVideosLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris ->
-        if (uris.isNotEmpty()) {
-            if (scannedFiles.isEmpty()) {
-                viewModel.addVideosFromPickerDirectlyToQueue(uris)
-                onNavigateToQueue()
-            } else {
-                viewModel.addVideosFromPicker(uris, null)
+        contract = object : androidx.activity.result.contract.ActivityResultContract<Unit, List<Uri>>() {
+            override fun createIntent(context: android.content.Context, input: Unit): android.content.Intent {
+                // ACTION_PICK directly opens the default system gallery app (Samsung Gallery on Samsung, Google Photos on Pixel)
+                return android.content.Intent(android.content.Intent.ACTION_PICK, android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI).apply {
+                    putExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, true)
+                }
+            }
+
+            override fun parseResult(resultCode: Int, intent: android.content.Intent?): List<Uri> {
+                if (resultCode != android.app.Activity.RESULT_OK || intent == null) return emptyList()
+                val uris = mutableListOf<Uri>()
+                intent.data?.let { uris.add(it) }
+                intent.clipData?.let { clipData ->
+                    for (i in 0 until clipData.itemCount) {
+                        clipData.getItemAt(i).uri?.let { uris.add(it) }
+                    }
+                }
+                return uris
             }
         }
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.addVideosFromPicker(uris, null)
+        }
+    }
+
+    val writePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { _ ->
+        viewModel.addSelectedToQueue()
+        onNavigateToQueue()
     }
 
     Column(
@@ -164,263 +186,6 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
             .fillMaxSize()
             .padding(16.dp)
     ) {
-        // COMPRESSION SETTINGS (Always visible at the top)
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f))
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    "COMPRESSION SETTINGS",
-                    color = PrimaryCyan,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
-
-                // 1. Codec choice
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Target Codec", color = TextWhite, fontSize = 14.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf("HEVC", "H.264").forEach { codec ->
-                            val isSelected = targetCodec == codec
-                            SuggestionChip(
-                                onClick = { viewModel.setTargetCodec(codec) },
-                                label = { Text(codec) },
-                                colors = SuggestionChipDefaults.suggestionChipColors(
-                                    containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                    labelColor = if (isSelected) PrimaryCyan else TextGray
-                                )
-                            )
-                        }
-                    }
-                }
-
-                // 2. Resolution choice
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Resolution", color = TextWhite, fontSize = 14.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf("Original", "1080p", "720p").forEach { res ->
-                            val isSelected = targetResolution == res
-                            SuggestionChip(
-                                onClick = { viewModel.setTargetResolution(res) },
-                                label = { Text(res) },
-                                colors = SuggestionChipDefaults.suggestionChipColors(
-                                    containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                    labelColor = if (isSelected) PrimaryCyan else TextGray
-                                )
-                            )
-                        }
-                    }
-                }
-
-                // 3. Quality Preset choice
-                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Preset", color = TextWhite, fontSize = 14.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            mapOf(
-                                "SMART" to "Smart",
-                                "HIGH_QUALITY" to "Quality",
-                                "MAX_COMPRESSION" to "Space",
-                                "CUSTOM" to "Custom"
-                            ).forEach { (preset, labelText) ->
-                                val isSelected = qualityPreset == preset
-                                SuggestionChip(
-                                    onClick = { viewModel.setQualityPreset(preset) },
-                                    label = { Text(labelText) },
-                                    colors = SuggestionChipDefaults.suggestionChipColors(
-                                        containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                        labelColor = if (isSelected) PrimaryCyan else TextGray
-                                    )
-                                )
-                            }
-                        }
-                    }
-                    val presetDescription = when (qualityPreset) {
-                        "HIGH_QUALITY" -> "Quality: Keeps maximum detail, slightly larger size."
-                        "MAX_COMPRESSION" -> "Space: Saves maximum storage, lower bitrate."
-                        "CUSTOM" -> "Custom: Manually specify the target video encoding bitrate."
-                        else -> "Smart: Recommended balance of size & visual quality."
-                    }
-                    Text(
-                        presetDescription,
-                        color = TextGray,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-
-                    if (qualityPreset == "CUSTOM") {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text("Target Bitrate", color = TextWhite, fontSize = 14.sp)
-                                Text(
-                                    text = String.format(java.util.Locale.US, "%.1f Mbps", customBitrateMbps),
-                                    color = PrimaryCyan,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
-                            Slider(
-                                value = customBitrateMbps,
-                                onValueChange = { viewModel.setCustomBitrateMbps(it) },
-                                valueRange = 0.5f..30.0f,
-                                colors = SliderDefaults.colors(
-                                    thumbColor = PrimaryCyan,
-                                    activeTrackColor = PrimaryCyan,
-                                    inactiveTrackColor = Color.Gray.copy(alpha = 0.24f)
-                                ),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
-
-                // 4. Output Mode choice (Save Copy vs Replace Original)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Output Mode", color = TextWhite, fontSize = 14.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        listOf(true to "Save Copy", false to "Replace").forEach { (keep, labelText) ->
-                            val isSelected = keepOriginal == keep
-                            SuggestionChip(
-                                onClick = { viewModel.setKeepOriginal(keep) },
-                                label = { Text(labelText) },
-                                colors = SuggestionChipDefaults.suggestionChipColors(
-                                    containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                    labelColor = if (isSelected) PrimaryCyan else TextGray
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // Folder selection card with premium glassmorphism styling
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0x3D1E293B)),
-            border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.2f))
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                if (folderUri == null && scannedFiles.isEmpty()) {
-                    Text(
-                        "Select videos to compress — pick from gallery or scan a folder.",
-                        color = TextGray,
-                        modifier = Modifier.padding(bottom = 16.dp),
-                        fontSize = 14.sp
-                    )
-                    Button(
-                        onClick = {
-                            pickVideosLauncher.launch(arrayOf("video/*"))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan),
-                        shape = RoundedCornerShape(12.dp),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Gallery", tint = Color.Black)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Pick from Gallery", color = Color.Black, fontWeight = FontWeight.Black)
-                    }
-                    Text(
-                        "Quick selection of 1-3 videos directly from your photo albums.",
-                        color = TextGray,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 12.dp)
-                    )
-                    Spacer(modifier = Modifier.height(2.dp))
-                    // Secondary: Select Folder (SAF, for batch processing)
-                    OutlinedButton(
-                        onClick = { openFolderLauncher.launch(null) },
-                        shape = RoundedCornerShape(12.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.4f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(imageVector = Icons.Default.Folder, contentDescription = "Folder", tint = PrimaryCyan)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Scan Entire Folder", color = PrimaryCyan, fontWeight = FontWeight.Bold)
-                    }
-                    Text(
-                        "Scan a whole directory to find and bulk compress older files.",
-                        color = TextGray,
-                        fontSize = 11.sp,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                } else {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("ACTIVE SELECTION", color = PrimaryCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                folderName ?: "Gallery Selection",
-                                fontWeight = FontWeight.Black,
-                                color = TextWhite,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontSize = 16.sp
-                            )
-                        }
-                        // Add more from gallery
-                        IconButton(
-                            onClick = {
-                                pickVideosLauncher.launch(arrayOf("video/*"))
-                            },
-                            modifier = Modifier
-                                .background(PrimaryCyan.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                                .padding(end = 4.dp)
-                        ) {
-                            Icon(Icons.Default.PlayArrow, contentDescription = "Add from Gallery", tint = PrimaryCyan)
-                        }
-                        // Change folder
-                        IconButton(
-                            onClick = { openFolderLauncher.launch(null) },
-                            modifier = Modifier.background(PrimaryCyan.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                        ) {
-                            Icon(Icons.Default.Refresh, contentDescription = "Change Folder", tint = PrimaryCyan)
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Files listing
         if (isScanning) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -430,120 +195,229 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                 }
             }
         } else if (scannedFiles.isEmpty()) {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No video files found in selection.", color = TextGray)
+            // Redesigned Start screen: First select file or folder
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Folder,
+                    contentDescription = "Select Source",
+                    tint = PrimaryCyan.copy(alpha = 0.8f),
+                    modifier = Modifier.size(72.dp)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Text(
+                    "Welcome to VCodec",
+                    color = TextWhite,
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "Select videos to compress — pick from gallery or scan a folder.",
+                    color = TextGray,
+                    fontSize = 14.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+
+                Button(
+                    onClick = { pickVideosLauncher.launch(Unit) },
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp),
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.PlayArrow, contentDescription = "Gallery", tint = Color.Black)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Pick from Gallery", color = Color.Black, fontWeight = FontWeight.Black, fontSize = 16.sp)
+                }
+                Text(
+                    "Quick selection of specific videos directly from your storage.",
+                    color = TextGray,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 6.dp, bottom = 20.dp)
+                )
+
+                OutlinedButton(
+                    onClick = { openFolderLauncher.launch(null) },
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.4f)),
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                ) {
+                    Icon(imageVector = Icons.Default.Folder, contentDescription = "Folder", tint = PrimaryCyan)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Scan Entire Folder", color = PrimaryCyan, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                }
+                Text(
+                    "Scan a whole directory to find and bulk compress older files.",
+                    color = TextGray,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
             }
         } else {
+            // File/folder selected! Show files checklist, then settings, then start button.
+            val selectedCount = scannedFiles.count { it.isSelected }
             var sortMenuExpanded by remember { mutableStateOf(false) }
             val sortOrder by viewModel.sortOrder.collectAsState()
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 4.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    "${scannedFiles.size} videos found",
-                    color = TextWhite,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp
-                )
-                // Sorting Chip Trigger
-                Box {
+                // Item 1: Active selection info row
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color(0x3D1E293B)),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.2f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("ACTIVE SELECTION", color = PrimaryCyan, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    folderName ?: "Gallery Selection",
+                                    fontWeight = FontWeight.Black,
+                                    color = TextWhite,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    fontSize = 16.sp
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                IconButton(
+                                    onClick = { pickVideosLauncher.launch(Unit) },
+                                    modifier = Modifier.background(PrimaryCyan.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                ) {
+                                    Icon(Icons.Default.PlayArrow, contentDescription = "Add from Gallery", tint = PrimaryCyan)
+                                }
+                                IconButton(
+                                    onClick = { openFolderLauncher.launch(null) },
+                                    modifier = Modifier.background(PrimaryCyan.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Change Folder", tint = PrimaryCyan)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Item 2: Header and sorting
+                item {
                     Row(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(DarkSurface)
-                            .clickable { sortMenuExpanded = true }
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = when (sortOrder) {
-                                MainViewModel.SortOrder.NAME_ASC -> "Name (A-Z)"
-                                MainViewModel.SortOrder.NAME_DESC -> "Name (Z-A)"
-                                MainViewModel.SortOrder.SIZE_ASC -> "Size (Asc)"
-                                MainViewModel.SortOrder.SIZE_DESC -> "Size (Desc)"
-                                MainViewModel.SortOrder.DATE_ASC -> "Date (Oldest)"
-                                MainViewModel.SortOrder.DATE_DESC -> "Date (Newest)"
-                            },
-                            color = PrimaryCyan,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
+                            "${scannedFiles.size} videos found",
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
                         )
+                        Box {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface)
+                                    .clickable { sortMenuExpanded = true }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = when (sortOrder) {
+                                        MainViewModel.SortOrder.NAME_ASC -> "Name (A-Z)"
+                                        MainViewModel.SortOrder.NAME_DESC -> "Name (Z-A)"
+                                        MainViewModel.SortOrder.SIZE_ASC -> "Size (Asc)"
+                                        MainViewModel.SortOrder.SIZE_DESC -> "Size (Desc)"
+                                        MainViewModel.SortOrder.DATE_ASC -> "Date (Oldest)"
+                                        MainViewModel.SortOrder.DATE_DESC -> "Date (Newest)"
+                                    },
+                                    color = PrimaryCyan,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = sortMenuExpanded,
+                                onDismissRequest = { sortMenuExpanded = false },
+                                modifier = Modifier.background(DarkSurface)
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Name (A-Z)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.NAME_ASC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Name (Z-A)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.NAME_DESC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Size (Smallest first)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.SIZE_ASC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Size (Largest first)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.SIZE_DESC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Date (Oldest first)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.DATE_ASC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Date (Newest first)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.DATE_DESC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
                     }
-                    DropdownMenu(
-                        expanded = sortMenuExpanded,
-                        onDismissRequest = { sortMenuExpanded = false },
-                        modifier = Modifier.background(DarkSurface)
+                }
+
+                // Item 3: Select all / Clear all
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        DropdownMenuItem(
-                            text = { Text("Name (A-Z)", color = TextWhite) },
-                            onClick = {
-                                viewModel.setSortOrder(MainViewModel.SortOrder.NAME_ASC)
-                                sortMenuExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Name (Z-A)", color = TextWhite) },
-                            onClick = {
-                                viewModel.setSortOrder(MainViewModel.SortOrder.NAME_DESC)
-                                sortMenuExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Size (Smallest first)", color = TextWhite) },
-                            onClick = {
-                                viewModel.setSortOrder(MainViewModel.SortOrder.SIZE_ASC)
-                                sortMenuExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Size (Largest first)", color = TextWhite) },
-                            onClick = {
-                                viewModel.setSortOrder(MainViewModel.SortOrder.SIZE_DESC)
-                                sortMenuExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Date (Oldest first)", color = TextWhite) },
-                            onClick = {
-                                viewModel.setSortOrder(MainViewModel.SortOrder.DATE_ASC)
-                                sortMenuExpanded = false
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Date (Newest first)", color = TextWhite) },
-                            onClick = {
-                                viewModel.setSortOrder(MainViewModel.SortOrder.DATE_DESC)
-                                sortMenuExpanded = false
-                            }
-                        )
+                        TextButton(onClick = { viewModel.toggleAllFilesSelection(true) }) {
+                            Text("Select All", color = PrimaryCyan)
+                        }
+                        TextButton(onClick = { viewModel.toggleAllFilesSelection(false) }) {
+                            Text("Clear All", color = TextGray)
+                        }
                     }
                 }
-            }
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = { viewModel.toggleAllFilesSelection(true) }) {
-                    Text("Select All", color = PrimaryCyan)
-                }
-                TextButton(onClick = { viewModel.toggleAllFilesSelection(false) }) {
-                    Text("Clear All", color = TextGray)
-                }
-            }
-
-            LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+                // Items list: checklist of files
                 items(
                     items = scannedFiles,
                     key = { it.uri.toString() }
@@ -604,29 +478,228 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                         }
                     }
                 }
-            }
 
-            val selectedCount = scannedFiles.count { it.isSelected }
+                // Item 4: Settings separator
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
 
-            if (selectedCount > 0) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = { viewModel.addSelectedToQueue() },
-                    enabled = selectedCount > 0,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(50.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PrimaryCyan,
-                        disabledContainerColor = DarkSurface
-                    )
-                ) {
-                    Text(
-                        "Add $selectedCount to Queue",
-                        color = if (selectedCount > 0) Color.Black else TextGray,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 16.sp
-                    )
+                // Item 5: COMPRESSION SETTINGS Card
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f))
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                "COMPRESSION SETTINGS",
+                                color = PrimaryCyan,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp,
+                                modifier = Modifier.padding(bottom = 12.dp)
+                            )
+
+                            // 1. Codec choice
+                            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                                Text("Target Codec", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf("HEVC", "H.264").forEach { codec ->
+                                        val isSelected = targetCodec == codec
+                                        SuggestionChip(
+                                            onClick = { viewModel.setTargetCodec(codec) },
+                                            label = { Text(codec, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center) },
+                                            modifier = Modifier.weight(1f),
+                                            colors = SuggestionChipDefaults.suggestionChipColors(
+                                                containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                                labelColor = if (isSelected) PrimaryCyan else TextGray
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 2. Resolution choice
+                            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                                Text("Resolution", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    listOf("Original", "1080p", "720p").forEach { res ->
+                                        val isSelected = targetResolution == res
+                                        SuggestionChip(
+                                            onClick = { viewModel.setTargetResolution(res) },
+                                            label = { Text(res, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center) },
+                                            modifier = Modifier.weight(1f),
+                                            colors = SuggestionChipDefaults.suggestionChipColors(
+                                                containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                                labelColor = if (isSelected) PrimaryCyan else TextGray
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            // 3. Quality Preset choice
+                            Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                                Text("Preset", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    mapOf(
+                                        "HIGH_QUALITY" to "Quality",
+                                        "MAX_COMPRESSION" to "Space",
+                                        "CUSTOM" to "Custom"
+                                    ).forEach { (preset, labelText) ->
+                                        val isSelected = qualityPreset == preset
+                                        SuggestionChip(
+                                            onClick = { viewModel.setQualityPreset(preset) },
+                                            label = { Text(labelText, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                            modifier = Modifier.weight(1f),
+                                            colors = SuggestionChipDefaults.suggestionChipColors(
+                                                containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                                labelColor = if (isSelected) PrimaryCyan else TextGray
+                                            )
+                                        )
+                                    }
+                                }
+                            }
+
+                            val presetDescription = when (qualityPreset) {
+                                "HIGH_QUALITY" -> "Quality: Keeps maximum detail, slightly larger size."
+                                "MAX_COMPRESSION" -> "Space: Saves maximum storage, lower bitrate."
+                                "CUSTOM" -> "Custom: Manually specify the target video encoding bitrate."
+                                else -> "Quality: Keeps maximum detail, slightly larger size."
+                            }
+                            Text(
+                                presetDescription,
+                                color = TextGray,
+                                fontSize = 11.sp,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+
+                            if (qualityPreset == "CUSTOM") {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Target Bitrate", color = TextWhite, fontSize = 14.sp)
+                                        Text(
+                                            text = String.format(java.util.Locale.US, "%.1f Mbps", customBitrateMbps),
+                                            color = PrimaryCyan,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Slider(
+                                        value = customBitrateMbps,
+                                        onValueChange = { viewModel.setCustomBitrateMbps(it) },
+                                        valueRange = 0.5f..30.0f,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = PrimaryCyan,
+                                            activeTrackColor = PrimaryCyan,
+                                            inactiveTrackColor = Color.Gray.copy(alpha = 0.24f)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Item 6: Output Mode card
+                item {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = DarkSurface),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.Gray.copy(alpha = 0.15f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Output Mode", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (keepOriginal) "Save Copy: Keeps original file" else "Replace Original: Replaces safely",
+                                    color = TextGray,
+                                    fontSize = 11.sp
+                                )
+                            }
+                            Switch(
+                                checked = keepOriginal,
+                                onCheckedChange = { viewModel.setKeepOriginal(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.Black,
+                                    checkedTrackColor = PrimaryCyan,
+                                    uncheckedThumbColor = TextGray,
+                                    uncheckedTrackColor = Color(0xFF334155)
+                                )
+                            )
+                        }
+                    }
+                }
+
+                // Item 7: Start Button
+                item {
+                    Button(
+                        onClick = {
+                            val selectedFiles = scannedFiles.filter { it.isSelected }
+                            val mediaStoreUris = selectedFiles.mapNotNull { file ->
+                                if (file.uri.authority == android.provider.MediaStore.AUTHORITY) {
+                                    file.uri
+                                } else {
+                                    val resolved = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, file.uri)
+                                    if (resolved != null && resolved.authority == android.provider.MediaStore.AUTHORITY) resolved else null
+                                }
+                            }
+
+                            if (!keepOriginal && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && mediaStoreUris.isNotEmpty()) {
+                                try {
+                                    val pendingIntent = android.provider.MediaStore.createWriteRequest(context.contentResolver, mediaStoreUris)
+                                    val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                                    writePermissionLauncher.launch(intentSenderRequest)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("ScannerScreen", "Failed to create write request: ${e.message}")
+                                    viewModel.addSelectedToQueue()
+                                    onNavigateToQueue()
+                                }
+                            } else {
+                                viewModel.addSelectedToQueue()
+                                onNavigateToQueue()
+                            }
+                        },
+                        enabled = selectedCount > 0,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = PrimaryCyan,
+                            disabledContainerColor = DarkSurface
+                        )
+                    ) {
+                        Text(
+                            "Start Compress ($selectedCount)",
+                            color = if (selectedCount > 0) Color.Black else TextGray,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
                 }
             }
         }
@@ -786,11 +859,6 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewMo
                             else -> PrimaryCyan
                         }
                     )
-                    val label = when {
-                        task.cpuTemp > 45.0f -> "Thermal Safety Active"
-                        task.cpuTemp > 40.0f -> "Cooling Device"
-                        else -> "Optimal Temp"
-                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -798,7 +866,7 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewMo
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            "$label (${String.format(Locale.getDefault(), "%.0f°C", task.cpuTemp)})",
+                            String.format(Locale.getDefault(), "%.0f°C", task.cpuTemp),
                             color = tempColor,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold

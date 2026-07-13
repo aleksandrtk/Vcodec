@@ -94,8 +94,8 @@ The system reads SoC thermal sensors directly via JNI or local sysfs lookups to 
 * **Thermal Threshold Indicators**:
   - **Normal** ($<40^{\circ}\text{C}$): Green chip indicator.
   - **Warm** ($40^{\circ}\text{C}$ to $47^{\circ}\text{C}$): Orange chip indicator.
-  - **Critical** ($>47^{\circ}\text{C}$): Red chip indicator (indicates device thermal throttling is active).
-* **No Active Throttling**: The application does not attempt to throttle the GPU/CPU workload, as Qualcomm's kernel space throttling manages thermal profiles safely. The metrics are displayed purely for professional monitoring and diagnostics.
+  - **Critical** ($>47^{\circ}\text{C}$): Red chip indicator (indicates device temperature is critical).
+* **No Throttling Control**: The application does not attempt to restrict or pause the GPU/CPU workload based on device temperature. The metrics are displayed purely for professional monitoring and diagnostics.
 
 ---
 

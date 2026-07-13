@@ -42,7 +42,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         DATE_DESC
     }
 
-    private val _sortOrder = MutableStateFlow(SortOrder.NAME_ASC)
+    private val _sortOrder = MutableStateFlow(SortOrder.DATE_DESC)
     val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
 
     fun setSortOrder(order: SortOrder) {
@@ -132,7 +132,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val name = cursor.getString(nameIndex) ?: ""
                         val mimeType = cursor.getString(mimeIndex) ?: ""
                         val size = cursor.getLong(sizeIndex)
-                        val lastModified = if (dateIndex != -1) cursor.getLong(dateIndex) else 0L
+                        var lastModified = if (dateIndex != -1) cursor.getLong(dateIndex) else 0L
+                        if (lastModified == 0L) {
+                            try {
+                                val fileUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
+                                val resolvedUri = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, fileUri)
+                                if (resolvedUri != null) {
+                                    context.contentResolver.query(
+                                        resolvedUri,
+                                        arrayOf(
+                                            android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
+                                            android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
+                                        ),
+                                        null, null, null
+                                    )?.use { c ->
+                                        if (c.moveToFirst()) {
+                                            val modIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
+                                            val addIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
+                                            val sec = when {
+                                                modIdx != -1 && !c.isNull(modIdx) -> c.getLong(modIdx)
+                                                addIdx != -1 && !c.isNull(addIdx) -> c.getLong(addIdx)
+                                                else -> 0L
+                                            }
+                                            if (sec > 0L) {
+                                                lastModified = sec * 1000L
+                                            }
+                                        }
+                                    }
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        if (lastModified == 0L) {
+                            lastModified = System.currentTimeMillis()
+                        }
 
                         if (mimeType == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
                             scanDirectoryContract(context, treeUri, childId, list)
@@ -181,7 +213,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _targetResolution = MutableStateFlow("Original")
     val targetResolution: StateFlow<String> = _targetResolution.asStateFlow()
 
-    private val _qualityPreset = MutableStateFlow("SMART")
+    private val _qualityPreset = MutableStateFlow("HIGH_QUALITY")
     val qualityPreset: StateFlow<String> = _qualityPreset.asStateFlow()
 
     private val _customBitrateMbps = MutableStateFlow(2.0f)
@@ -275,32 +307,118 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     var name = "video.mp4"
                     var size = 0L
                     var lastModified = 0L
+
+                    // 1. Query Display Name and Size (guaranteed to succeed on all content URIs)
                     try {
                         context.contentResolver.query(
                             uri,
                             arrayOf(
                                 android.provider.OpenableColumns.DISPLAY_NAME, 
-                                android.provider.OpenableColumns.SIZE,
-                                android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED
+                                android.provider.OpenableColumns.SIZE
                             ),
                             null, null, null
                         )?.use { cursor ->
                             if (cursor.moveToFirst()) {
-                                name = cursor.getString(0) ?: "video.mp4"
-                                size = cursor.getLong(1)
-                                if (cursor.columnCount > 2 && !cursor.isNull(2)) {
-                                    lastModified = cursor.getLong(2)
+                                val nameIdx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                                val sizeIdx = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                                if (nameIdx != -1) {
+                                    name = cursor.getString(nameIdx) ?: "video.mp4"
+                                }
+                                if (sizeIdx != -1) {
+                                    size = cursor.getLong(sizeIdx)
                                 }
                             }
                         }
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to query URI metadata: ${e.message}")
+                        Log.e(TAG, "Failed to query OpenableColumns: ${e.message}")
+                    }
+
+                    // 2. Query Last Modified Date based on URI scheme/authority
+                    try {
+                        val isDocument = android.provider.DocumentsContract.isDocumentUri(context, uri)
+                        if (isDocument) {
+                            // Document URI: query last_modified column
+                            context.contentResolver.query(
+                                uri,
+                                arrayOf(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+                                null, null, null
+                            )?.use { c ->
+                                if (c.moveToFirst()) {
+                                    val idx = c.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                                    if (idx != -1 && !c.isNull(idx)) {
+                                        lastModified = c.getLong(idx)
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Failed to query Document last modified: ${e.message}")
+                    }
+
+                    // 3. MediaStore Fallback for Name, Date and Size (if size is 0 or lastModified is 0 or name is video.mp4)
+                    if (size == 0L || lastModified == 0L || name == "video.mp4") {
+                        try {
+                            val mediaStoreUri = if (uri.authority == android.provider.MediaStore.AUTHORITY) {
+                                uri
+                            } else {
+                                com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, uri)
+                            }
+
+                            if (mediaStoreUri != null) {
+                                context.contentResolver.query(
+                                    mediaStoreUri,
+                                    arrayOf(
+                                        android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME,
+                                        android.provider.MediaStore.Video.VideoColumns.SIZE,
+                                        android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
+                                        android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
+                                    ),
+                                    null, null, null
+                                )?.use { c ->
+                                    if (c.moveToFirst()) {
+                                        val nameIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME)
+                                        val sizeIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.SIZE)
+                                        val modIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
+                                        val addIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
+
+                                        if ((name == "video.mp4" || name.isEmpty()) && nameIdx != -1) {
+                                            name = c.getString(nameIdx) ?: "video.mp4"
+                                        }
+                                        if (size == 0L && sizeIdx != -1) {
+                                            size = c.getLong(sizeIdx)
+                                        }
+                                        if (lastModified == 0L) {
+                                            val sec = when {
+                                                modIdx != -1 && !c.isNull(modIdx) -> c.getLong(modIdx)
+                                                addIdx != -1 && !c.isNull(addIdx) -> c.getLong(addIdx)
+                                                else -> 0L
+                                            }
+                                            if (sec > 0L) {
+                                                lastModified = sec * 1000L
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Failed to resolve metadata fallback from MediaStore: ${e.message}")
+                        }
+                    }
+
+                    if (lastModified == 0L) {
+                        lastModified = System.currentTimeMillis()
+                    }
+
+                    val resolvedRelativePath = try {
+                        com.vcodec.smartencoder.metadata.MetadataRestorer.extractRelativePathFromMediaStore(context, uri)
+                    } catch (e: Exception) {
+                        null
                     }
 
                     newFiles.add(
                         ScannedFile(
                             uri = uri,
-                            path = null,
+                            path = resolvedRelativePath,
                             name = name,
                             size = size,
                             lastModified = lastModified,

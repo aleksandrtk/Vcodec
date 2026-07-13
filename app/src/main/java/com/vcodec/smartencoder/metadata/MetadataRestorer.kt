@@ -100,7 +100,7 @@ object MetadataRestorer {
         return null
     }
 
-    fun extractRelativePathFromMediaStore(context: Context, sourceUri: Uri): String? {
+    fun extractRelativePathFromMediaStore(context: Context, sourceUri: Uri, resolveFallback: Boolean = true): String? {
         val projectionsToTry = mutableListOf<String>()
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
             projectionsToTry.add(MediaStore.Video.VideoColumns.RELATIVE_PATH)
@@ -151,19 +151,21 @@ object MetadataRestorer {
         }
 
         // 2. Try resolving to MediaStore URI by Display Name
-        try {
-            val mediaStoreUri = resolveToMediaStoreUri(context, sourceUri)
-            if (mediaStoreUri != null) {
-                for (column in projectionsToTry) {
-                    context.contentResolver.query(mediaStoreUri, arrayOf(column), null, null, null)?.use { cursor ->
-                        if (cursor.moveToFirst()) {
-                            val path = processCursor(cursor, column)
-                            if (path != null) return path
+        if (resolveFallback) {
+            try {
+                val mediaStoreUri = resolveToMediaStoreUri(context, sourceUri)
+                if (mediaStoreUri != null) {
+                    for (column in projectionsToTry) {
+                        context.contentResolver.query(mediaStoreUri, arrayOf(column), null, null, null)?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                val path = processCursor(cursor, column)
+                                if (path != null) return path
+                            }
                         }
                     }
                 }
-            }
-        } catch (e: Exception) { /* ignore */ }
+            } catch (e: Exception) { /* ignore */ }
+        }
         
         // 3. Fallback: parse SAF URI path directly
         if (sourceUri.scheme == "content" && sourceUri.authority == "com.android.externalstorage.documents") {
@@ -453,7 +455,7 @@ object MetadataRestorer {
         try {
             val displayName = getDisplayName(context, uri)
             if (displayName != null) {
-                val relativePath = extractRelativePathFromMediaStore(context, uri)
+                val relativePath = extractRelativePathFromMediaStore(context, uri, resolveFallback = false)
                 val foundUri = findMediaStoreUri(context, displayName, relativePath)
                 if (foundUri != null) return foundUri
                 

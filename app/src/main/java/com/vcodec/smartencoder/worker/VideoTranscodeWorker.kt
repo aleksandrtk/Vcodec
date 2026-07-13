@@ -186,7 +186,8 @@ class VideoTranscodeWorker(
                             sourceUri = sourceUri,
                             keepOriginal = currentTask.keepOriginal,
                             fileName = currentTask.fileName,
-                            originalDates = originalDates
+                            originalDates = originalDates,
+                            sourcePath = currentTask.sourcePath
                         )
                         
                         if (finalUri != null) {
@@ -326,24 +327,28 @@ class VideoTranscodeWorker(
                             )
                             
                             // 2. Delete the original file entirely
+                            var deleteSuccess = false
                             try {
                                 android.provider.DocumentsContract.deleteDocument(context.contentResolver, sourceUri)
+                                deleteSuccess = true
                             } catch (e: Exception) {
                                 try {
-                                    context.contentResolver.delete(sourceUri, null, null)
+                                    val rows = context.contentResolver.delete(sourceUri, null, null)
+                                    deleteSuccess = rows > 0
                                 } catch (e2: Exception) {
                                     Log.e(TAG, "Failed to delete original file: ${e2.message}")
                                 }
                             }
                             
-                            // 3. Create a brand new file with the EXACT same name
+                            // 3. Create a brand new file with the EXACT same name (if delete succeeded)
                             val resolvedUri = MediaStorageManager.createOutputUri(
                                 context = context,
                                 sourceUri = sourceUri,
                                 keepOriginal = true, // We MUST use true so it uses MediaStore.insert()
                                 fileName = currentTask.fileName,
                                 originalDates = originalDates,
-                                exactName = true     // Prevents appending "_compressed"
+                                exactName = deleteSuccess,    // Prevents duplicate naming suffix if delete failed
+                                sourcePath = currentTask.sourcePath
                             )
                             
                             if (resolvedUri == null) {
@@ -355,7 +360,8 @@ class VideoTranscodeWorker(
                                     keepOriginal = true,
                                     fileName = currentTask.fileName,
                                     originalDates = originalDates,
-                                    exactName = false // allows _compressed suffix
+                                    exactName = false, // allows _compressed suffix
+                                    sourcePath = currentTask.sourcePath
                                 ) ?: throw java.io.IOException("Failed to create even a recovery MediaStore entry")
                                 
                                 finalUri = recoveryUri
@@ -379,7 +385,8 @@ class VideoTranscodeWorker(
                                     keepOriginal = true,
                                     fileName = currentTask.fileName,
                                     originalDates = originalDates,
-                                    exactName = false
+                                    exactName = false,
+                                    sourcePath = currentTask.sourcePath
                                 ) ?: throw java.io.IOException("Recovery path failed to create MediaStore entry", e)
                                 
                                 context.contentResolver.openOutputStream(recoveryUri)?.use { outputStream ->
