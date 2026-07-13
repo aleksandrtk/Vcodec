@@ -1,0 +1,1 @@
+/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/src/main/cpp/CMakeLists.txt

@@ -1,0 +1,7 @@
+[
+{
+  "directory": "/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/.cxx/Debug/8691f1m4/arm64-v8a",
+  "command": "/Users/Oleksandr_Tkachuk/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/bin/clang++ --target=aarch64-none-linux-android26 --sysroot=/Users/Oleksandr_Tkachuk/Library/Android/sdk/ndk/28.2.13676358/toolchains/llvm/prebuilt/darwin-x86_64/sysroot -Dmetadata_restorer_EXPORTS -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++17 -fno-limit-debug-info  -fPIC -o CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o -c \"/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/src/main/cpp/metadata-restorer.cpp\"",
+  "file": "/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/src/main/cpp/metadata-restorer.cpp"
+}
+]

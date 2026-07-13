@@ -1,0 +1,44 @@
+# Built-in Git Ignore Templates for Android & Gradle projects
+
+# Gradle files
+.gradle/
+build/
+app/build/
+/build
+/app/build
+
+# Local configuration
+local.properties
+.DS_Store
+
+# Android Studio / IDEA files
+.idea/
+*.iml
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/gradle.xml
+.idea/assetWizardSettings.xml
+.idea/dictionaries
+.idea/libraries
+.idea/caches/
+
+# Kotlin
+.kotlin/
+.kotlin-build/
+
+# VS Code files
+.vscode/
+
+# Logs & Heap dumps
+*.log
+*.hprof
+java_pid*.hprof
+
+# Test files & temporary scripts (optional but recommended to keep clean)
+test_video_2023.mp4
+phone_simulator.html
+parse_saf.kt
+test_dates.py
+verify_transcode.sh
+_bmad/
+_bmad-output/

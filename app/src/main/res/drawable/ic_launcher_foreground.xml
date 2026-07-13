@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Blue/Cyan color from your theme -->
+    <path
+        android:fillColor="#06B6D4"
+        android:pathData="M30,35 C30,30 35,25 45,25 L65,25 C75,25 80,30 80,35 L80,40 C80,45 75,50 65,50 L45,50 C35,50 30,55 30,60 L30,75 C30,80 35,85 45,85 L65,85 C75,85 80,80 80,75"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"/>
+</vector>

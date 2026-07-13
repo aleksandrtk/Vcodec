@@ -1,0 +1,53 @@
+# ninja log v5
+0	864	1783842382208837707	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+865	1469	1783842382816224214	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	7	0	clean	ae0275e159e6d2b5
+2	804	1783842553726285388	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+804	1410	1783842554332419539	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	8	0	clean	ae0275e159e6d2b5
+0	12	0	clean	ae0275e159e6d2b5
+1	823	1783842707704711925	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+823	1544	1783842708389966986	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	19	0	clean	ae0275e159e6d2b5
+0	7	0	clean	ae0275e159e6d2b5
+2	808	1783842994676308922	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+808	1443	1783842995314460491	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	24	0	clean	ae0275e159e6d2b5
+3	890	1783843313326618053	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+890	1478	1783843313914881081	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	14	0	clean	ae0275e159e6d2b5
+1	1042	1783846657137821691	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+1042	1634	1783846657731056957	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	7	0	clean	ae0275e159e6d2b5
+2	903	1783846960171849434	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+903	1491	1783846960759339016	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	21	0	clean	ae0275e159e6d2b5
+1	1126	1783847288802050163	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+1126	1718	1783847289398063731	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	20	0	clean	ae0275e159e6d2b5
+1	1074	1783847866246465803	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+1074	1666	1783847866837359803	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	18	0	clean	ae0275e159e6d2b5
+2	1073	1783848178247946632	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+1073	1670	1783848178843189412	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+1	20	0	clean	ae0275e159e6d2b5
+2	824	1783848544013233545	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+824	1438	1783848544626240489	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	19	0	clean	ae0275e159e6d2b5
+1	925	1783849159678849271	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+925	1502	1783849160258801691	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	10	0	clean	ae0275e159e6d2b5
+2	904	1783849695024130954	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+904	1485	1783849695605978803	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	23	0	clean	ae0275e159e6d2b5
+1	1032	1783850207086154225	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+1032	1628	1783850207682098233	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	20	0	clean	ae0275e159e6d2b5
+2	1000	1783850489255922336	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+1000	1587	1783850489843565235	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	18	0	clean	ae0275e159e6d2b5
+2	933	1783850950387504440	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+933	1513	1783850950968299311	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
+0	20	0	clean	ae0275e159e6d2b5
+1	888	1783851550820584225	CMakeFiles/metadata-restorer.dir/metadata-restorer.cpp.o	3126a8de5e4ced63
+888	1481	1783851551413519015	/Users/Oleksandr_Tkachuk/Desktop/ VCodec/app/build/intermediates/cxx/Debug/8691f1m4/obj/arm64-v8a/libmetadata-restorer.so	db7718d642bba0c3
