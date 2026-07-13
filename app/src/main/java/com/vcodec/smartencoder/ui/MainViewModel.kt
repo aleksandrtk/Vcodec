@@ -184,12 +184,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _qualityPreset = MutableStateFlow("SMART")
     val qualityPreset: StateFlow<String> = _qualityPreset.asStateFlow()
 
+    private val _customBitrateMbps = MutableStateFlow(2.0f)
+    val customBitrateMbps: StateFlow<Float> = _customBitrateMbps.asStateFlow()
+
     private val _keepOriginal = MutableStateFlow(true)
     val keepOriginal: StateFlow<Boolean> = _keepOriginal.asStateFlow()
 
     fun setTargetCodec(codec: String) { _targetCodec.value = codec }
     fun setTargetResolution(res: String) { _targetResolution.value = res }
     fun setQualityPreset(preset: String) { _qualityPreset.value = preset }
+    fun setCustomBitrateMbps(bitrate: Float) { _customBitrateMbps.value = bitrate }
     fun setKeepOriginal(keep: Boolean) { _keepOriginal.value = keep }
 
     fun startQueue() {
@@ -228,6 +232,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     targetHeight = 0,
                     targetResolution = res,
                     qualityPreset = preset,
+                    targetBitrate = if (preset == "CUSTOM") (_customBitrateMbps.value * 1_000_000).toInt() else 0,
                     keepOriginal = keepOrig
                 )
                 repository.addTask(newTask)

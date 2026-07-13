@@ -446,6 +446,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
                 val targetCodec by viewModel.targetCodec.collectAsState()
                 val targetResolution by viewModel.targetResolution.collectAsState()
                 val qualityPreset by viewModel.qualityPreset.collectAsState()
+                val customBitrateMbps by viewModel.customBitrateMbps.collectAsState()
 
                 Card(
                     modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -516,7 +517,12 @@ fun ScannerScreen(viewModel: MainViewModel) {
                             ) {
                                 Text("Preset", color = TextWhite, fontSize = 14.sp)
                                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    mapOf("SMART" to "Smart", "HIGH_QUALITY" to "Quality", "MAX_COMPRESSION" to "Space").forEach { (preset, labelText) ->
+                                    mapOf(
+                                        "SMART" to "Smart",
+                                        "HIGH_QUALITY" to "Quality",
+                                        "MAX_COMPRESSION" to "Space",
+                                        "CUSTOM" to "Custom"
+                                    ).forEach { (preset, labelText) ->
                                         val isSelected = qualityPreset == preset
                                         SuggestionChip(
                                             onClick = { viewModel.setQualityPreset(preset) },
@@ -532,6 +538,7 @@ fun ScannerScreen(viewModel: MainViewModel) {
                             val presetDescription = when (qualityPreset) {
                                 "HIGH_QUALITY" -> "Quality: Keeps maximum detail, slightly larger size."
                                 "MAX_COMPRESSION" -> "Space: Saves maximum storage, lower bitrate."
+                                "CUSTOM" -> "Custom: Manually specify the target video encoding bitrate."
                                 else -> "Smart: Recommended balance of size & visual quality."
                             }
                             Text(
@@ -540,6 +547,36 @@ fun ScannerScreen(viewModel: MainViewModel) {
                                 fontSize = 11.sp,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
+
+                            if (qualityPreset == "CUSTOM") {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Column(modifier = Modifier.fillMaxWidth()) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Target Bitrate", color = TextWhite, fontSize = 14.sp)
+                                        Text(
+                                            text = String.format(java.util.Locale.US, "%.1f Mbps", customBitrateMbps),
+                                            color = PrimaryCyan,
+                                            fontSize = 14.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Slider(
+                                        value = customBitrateMbps,
+                                        onValueChange = { viewModel.setCustomBitrateMbps(it) },
+                                        valueRange = 0.5f..30.0f,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = PrimaryCyan,
+                                            activeTrackColor = PrimaryCyan,
+                                            inactiveTrackColor = Color.Gray.copy(alpha = 0.24f)
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
                         }
 
                         // 4. Output Mode choice (Save Copy vs Replace Original)
@@ -791,7 +828,7 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context) {
                 )
                 if (task.status == TaskStatus.PROCESSING && task.targetBitrate > 0) {
                     Text(
-                        "Target: H.265 @ ${(task.targetBitrate / 1_000_000.0).format(1)} Mbps",
+                        "Target: ${task.targetCodec} @ ${(task.targetBitrate / 1_000_000.0).format(1)} Mbps",
                         color = TextGray,
                         fontSize = 12.sp
                     )
