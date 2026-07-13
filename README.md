@@ -1,66 +1,68 @@
-# VCodec — Smart Video Encoder & Compressor для Android
+# VCodec — Smart Video Encoder & Compressor for Android
 
-**VCodec (Smart Encoder)** — это высокопроизводительное Android-приложение для интеллектуального сжатия тяжелых видеофайлов (например, записей 4K H.264/HEVC со смартфонов) в энергоэффективный формат H.265 (HEVC) без потери визуального качества.
+**VCodec (Smart Encoder)** is a high-performance Android utility designed to compress high-bitrate videos (e.g., 4K H.264/HEVC recordings from modern smartphones) into space-saving H.265 (HEVC) files without sacrificing visual quality.
 
-Главное отличие VCodec — **эмуляция Constant Rate Factor (CRF) на уровне аппаратного ускорения** в сочетании с **полным сохранением метаданных** (дата съемки, геопозиция, модель камеры, специфические теги Samsung) и физических дат файлов, что предотвращает «ломание» хронологического порядка в Samsung Gallery (Галерее) при замене оригиналов.
-
----
-
-## ⚙️ Аппаратная оптимизация и поддержка процессоров
-
-Проект глубоко оптимизирован под аппаратные кодеки мобильных платформ, с особым фокусом на чипсеты **Qualcomm Snapdragon**:
-* 🔥 **Snapdragon 8 Gen 3 (Samsung Galaxy S24 Ultra)** — максимальная скорость кодирования, поддержка 10-битного HDR10+ и аппаратное ускорение HEVC/AV1.
-* ⚡ **Snapdragon 888 (Samsung Galaxy S21 5G)** — сбалансированная работа с HEVC при высокой энергоэффективности.
-* 🌡️ **Тепловой мониторинг (Thermal Throttling)**: Приложение непрерывно отслеживает температуру процессора через системные датчики (`/sys/class/thermal`). При перегреве устройства производительность кодировщика автоматически адаптируется для предотвращения троттлинга процессора и сохранения стабильности ОС.
+The core differentiator of VCodec is its **hardware-level Constant Rate Factor (CRF) emulation** combined with **absolute metadata preservation** (taken dates, GPS locations, camera model, and proprietary Samsung-specific camera tags) and physical file dates, preventing the "broken" chronological order in the Samsung Gallery when replacing original videos.
 
 ---
 
-## 🌟 Основные возможности
+## ⚙️ Hardware Optimization & Processor Support
 
-1. **Интеллектуальный расчет битрейта (Smart Heuristics)**:
-   Приложение заменяет стандартный постоянный битрейт (CBR) на адаптивную эмуляцию CRF. Алгоритм проводит быстрый анализ сложности видео и вычисляет оптимальный VBR по формуле:
-   $$\text{Target Bitrate} = \text{Base Bitrate}(\text{Res}, \text{FPS}) \times C_{\text{motion}} \times C_{\text{noise}} \times C_{\text{hdr}}$$
-   * *$C_{\text{motion}}$ (Коэффициент движения)*: сканирует разницу между ключевыми кадрами (I-кадрами) для определения динамики (низкая динамика снижает битрейт на 40%, высокая — повышает для устранения пикселизации).
-   * *$C_{\text{noise}}$ (Коэффициент шума/детализации)*: анализирует высокочастотные компоненты (DCT/FFT) темных или зернистых сцен.
-   * *$C_{\text{hdr}}$ (Цветовой диапазон)*: автоматически выделяет на 25% больше битрейта для 10-битного HDR (BT.2020) во избежание градиентного бандинга.
-
-2. **Сохранение хронологии в Галерее (Samsung Gallery)**:
-   Обычные видеоконвертеры при сохранении сжатого файла сбрасывают даты добавления и модификации (`DATE_ADDED`, `DATE_MODIFIED`) на текущее время. Из-за этого сжатые видео улетают в самый верх галереи. 
-   VCodec использует специальную стратегию **MediaStore Scoped Storage «Удаление и Воссоздание»**:
-   * Извлекает точные даты создания (`Date Taken`) из исходных метаданных MP4 или MediaStore.
-   * Выполняет транскодирование во временный файл.
-   * Копирует все метаданные через нативный код JNI.
-   * Удаляет оригинал и регистрирует новую запись в MediaStore с тем же именем и исходными датами съемки, сохраняя идеальный порядок сортировки.
-
-3. **Ручной контроль битрейта (Custom Preset)**:
-   Возможность вручную задать желаемый битрейт кодирования через удобный слайдер (от **0.5 Mbps до 30.0 Mbps**) прямо на главном экране.
-
-4. **Два режима работы под любые задачи**:
-   * **Быстрый выбор из Галереи (Pick from Gallery)**: Настраиваете параметры сжатия вверху экрана, выбираете файлы, и они мгновенно добавляются в очередь на сжатие, а приложение перенаправляет вас на экран прогресса.
-   * **Пакетное сканирование папки (Scan Entire Folder)**: Указываете папку, приложение сканирует её на наличие видеофайлов, выводит список с размерами, сортировкой, и позволяет гибко выбрать нужные файлы для пакетной обработки.
+The application is deeply optimized for mobile system-on-chip (SoC) media pipelines, with a primary focus on **Qualcomm Snapdragon** processors:
+* 🔥 **Snapdragon 8 Gen 3 (Samsung Galaxy S24 Ultra)** — Maximum encoding speed, 10-bit HDR10+ support, and hardware-accelerated HEVC/AV1 pipelines.
+* ⚡ **Snapdragon 888 (Samsung Galaxy S21 5G)** — Balanced HEVC processing with excellent thermal efficiency.
+* 🌡️ **Thermal Safety Throttling**: The pipeline continuously monitors processor temperature via system sensors (`/sys/class/thermal`). If the device heats up, the encoding speed is dynamically throttled to prevent CPU thermal throttling and maintain system stability.
 
 ---
 
-## 🛠️ Архитектура системы
+## 🌟 Key Features
 
-Приложение спроектировано по принципам Clean Architecture и состоит из следующих компонентов:
+1. **Smart Bitrate Calculation (CRF Emulation)**:
+   Hardware encoders on Android (`MediaCodec`) do not natively support Constant Rate Factor (CRF). VCodec overcomes this by analyzing the input video complexity and calculating a target Variable Bitrate (VBR) before launching the encoder:
+
+   `Target Bitrate = Base Bitrate(Res, FPS) * C_motion * C_noise * C_hdr`
+
+   * **Base Bitrate**: Determined by the source resolution and framerate (e.g., 12 Mbps for 4K 30fps, 3.8 Mbps for 1080p 30fps).
+   * **C_motion (Motion Complexity Coefficient)**: Scans structural differences between keyframes (I-frames). Low-motion videos (e.g., interviews, presentations) reduce the bitrate by up to 40%, while high-motion videos (sports, action camera footage) increase it to prevent blockiness and pixelation.
+   * **C_noise (Noise & High-Frequency Details)**: Analyzes variance in the high-frequency DCT/FFT domain of selected frames. Increases bitrate in dark, grainy, or complex night scenes to preserve details.
+   * **C_hdr (Color Depth Factor)**: Allocates 25% more bitrate for 10-bit HDR (BT.2020) to avoid color banding and gradient artifacts.
+
+2. **Absolute Chronological Integrity (Samsung Gallery)**:
+   Standard video compressors reset file dates (`DATE_ADDED`, `DATE_MODIFIED`) to the current time, throwing compressed files to the top of the photo timeline. VCodec implements a **MediaStore Scoped Storage "Delete & Recreate" Strategy**:
+   * Reads original `Date Taken` and custom headers from the source MP4 container.
+   * Transcodes to a temporary file.
+   * Copies all binary headers via native JNI.
+   * Completely deletes the original file and registers a new MediaStore entry with the exact original filename and timestamps, keeping your photo library sorted correctly.
+
+3. **Manual Bitrate Selector (Custom Preset)**:
+   Allows setting a manual target bitrate (from **0.5 Mbps to 30.0 Mbps**) via a slider on the settings panel.
+
+4. **Streamlined Workflows**:
+   * **Pick from Gallery (Direct Flow)**: Set compression settings at the top, select files from the gallery, and they are immediately added to the queue for active background compression, redirecting you straight to the **Queue** tab.
+   * **Scan Entire Folder (Interactive Batch)**: Scan a folder, browse the list of files, select specific videos, adjust settings, and add them to the queue manually.
+
+---
+
+## 🛠️ System Architecture
+
+The project follows Clean Architecture guidelines:
 
 ```mermaid
 graph TD
     UI[Jetpack Compose UI] --> VM[ViewModels State Management]
     VM --> Repo[Task Repository]
-    Repo --> DB[(Room Database - История и Очередь)]
+    Repo --> DB[(Room Database - History & Queue)]
     Repo --> WM[WorkManager Scheduler]
     WM --> FGS[Foreground Service Worker]
     FGS --> Controller[Pipeline Controller]
     
-    subgraph Нативный слой и Аппаратное ускорение
+    subgraph Native Layer & Hardware Acceleration
         Controller --> Analyzer[Complexity Analyzer]
         Controller --> Transcoder[Media3 Transformer / MediaCodec]
         Controller --> MetaRestorer[C++ Native Metadata Restorer NDK]
     end
     
-    subgraph Уровень ОС
+    subgraph OS & Drivers
         Transcoder --> HW[Snapdragon HEVC Hardware Encoder]
         Controller --> Sysfs[/sys/class/thermal CPU Temp Monitor]
     end
@@ -68,52 +70,41 @@ graph TD
 
 ---
 
-## 📂 Демонстрация работы и структура интерфейса
+## 📂 Subscreens & User Interface
 
-Интерфейс разделен на 3 основных экрана:
-
-1. **Сканер (Scanner)**:
-   * **Compression Settings**: Выбор целевого кодека (HEVC, H.264), разрешения (Original, 1080p, 720p), пресета качества (Smart, Quality, Space, Custom) и режима вывода (Save Copy или Replace).
-   * **Выбор источника**: Кнопки быстрого выбора файлов из галереи или сканирования целой директории.
-   * **Список файлов**: Удобная интерактивная таблица найденных видео с сортировкой по имени, размеру или дате.
-
-2. **Очередь (Queue)**:
-   * Отображение текущего прогресса сжатия в реальном времени.
-   * Информация о скорости кодирования (FPS) и температуре процессора (в °C) для контроля нагрева.
-   * Возможность приостанавливать (Pause), возобновлять (Resume) или удалять задачи из очереди.
-
-3. **История и Экономия (Savings & History)**:
-   * Статистика сэкономленного дискового пространства в гигабайтах (ГБ) с красивой аналитикой эффективности сжатия.
-   * Логи завершенных задач.
+The interface features three main tabs:
+1. **Scanner**: Configure target settings (Codec, Resolution, Preset, custom bitrate, and Output Mode), scan folder or pick from gallery, and review the interactive files list.
+2. **Queue**: Monitor active transcode progress, speed (FPS), and CPU temperature. Manage tasks (pause, resume, delete).
+3. **Savings & History**: View total storage saved (in GB) with compression analytics.
 
 ---
 
-## 💻 Сборка и тестирование
+## 💻 Build & Test Instructions
 
-### Требования к сборке:
-* Android Studio (Koala или новее)
+### Requirements:
+* Android Studio (Koala or newer)
 * JDK 17
-* Android NDK (версии 25+) для компиляции нативного C++ модуля восстановления метаданных.
+* Android NDK (version 25+) for compiling native C++ metadata restoration libraries.
 
-### Команды Gradle:
+### Gradle Commands:
 
-* **Сборка отладочного APK**:
+* **Compile Debug APK**:
   ```bash
   ./gradlew assembleDebug
   ```
-  После успешной сборки готовый APK будет находиться по пути: `app/build/outputs/apk/debug/app-debug.apk`.
+  The output file is generated at `app/build/outputs/apk/debug/app-debug.apk`.
 
-* **Запуск модульных тестов**:
+* **Run Unit Tests**:
   ```bash
   ./gradlew testDebugUnitTest
   ```
 
-* **Запуск тестов на устройстве (JNI & MediaStore интеграция)**:
+* **Run Device Integration Tests**:
   ```bash
   ./gradlew connectedAndroidTest
   ```
 
-* **Автоматическое форматирование кода (Spotless & ktlint)**:
+* **Format Code style (Spotless & ktlint)**:
   ```bash
   ./gradlew spotlessApply
   ```
