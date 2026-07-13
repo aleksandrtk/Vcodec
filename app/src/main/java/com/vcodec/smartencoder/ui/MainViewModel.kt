@@ -42,7 +42,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         DATE_DESC
     }
 
-    private val _sortOrder = MutableStateFlow(SortOrder.NAME_ASC)
+    private val _sortOrder = MutableStateFlow(SortOrder.DATE_DESC)
     val sortOrder: StateFlow<SortOrder> = _sortOrder.asStateFlow()
 
     fun setSortOrder(order: SortOrder) {
