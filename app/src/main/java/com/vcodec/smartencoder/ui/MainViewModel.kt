@@ -331,6 +331,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun addVideosFromPickerDirectlyToQueue(uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val context: Context = getApplication()
+                val codec = _targetCodec.value
+                val res = _targetResolution.value
+                val preset = _qualityPreset.value
+                val keepOrig = _keepOriginal.value
+                val customBitrate = if (preset == "CUSTOM") (_customBitrateMbps.value * 1_000_000).toInt() else 0
+
+                for (uri in uris) {
+                    try {
+                        val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                        context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                    } catch (_: SecurityException) {
+                        try {
+                            context.contentResolver.takePersistableUriPermission(
+                                uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                            )
+                        } catch (_: SecurityException) {}
+                    }
+
+                    var name = "video.mp4"
+                    var size = 0L
+                    try {
+                        context.contentResolver.query(
+                            uri,
+                            arrayOf(
+                                android.provider.OpenableColumns.DISPLAY_NAME, 
+                                android.provider.OpenableColumns.SIZE
+                            ),
+                            null, null, null
+                        )?.use { cursor ->
+                            if (cursor.moveToFirst()) {
+                                name = cursor.getString(0) ?: "video.mp4"
+                                size = cursor.getLong(1)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to query URI metadata: ${e.message}")
+                    }
+
+                    val newTask = TranscodeTask(
+                        sourceUri = uri.toString(),
+                        sourcePath = null,
+                        destUri = null,
+                        destPath = null,
+                        fileName = name,
+                        originalSize = size,
+                        status = TaskStatus.PENDING,
+                        targetCodec = codec,
+                        targetWidth = 0,
+                        targetHeight = 0,
+                        targetResolution = res,
+                        qualityPreset = preset,
+                        targetBitrate = customBitrate,
+                        keepOriginal = keepOrig
+                    )
+                    repository.addTask(newTask)
+                }
+            }
+        }
+    }
+
     fun pauseTask(taskId: Long) = viewModelScope.launch { repository.pauseTask(taskId) }
 
     fun resumeTask(taskId: Long) = viewModelScope.launch { repository.resumeTask(taskId) }
