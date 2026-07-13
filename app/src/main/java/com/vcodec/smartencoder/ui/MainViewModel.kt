@@ -409,10 +409,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         lastModified = System.currentTimeMillis()
                     }
 
+                    val resolvedRelativePath = try {
+                        com.vcodec.smartencoder.metadata.MetadataRestorer.extractRelativePathFromMediaStore(context, uri)
+                    } catch (e: Exception) {
+                        null
+                    }
+
                     newFiles.add(
                         ScannedFile(
                             uri = uri,
-                            path = null,
+                            path = resolvedRelativePath,
                             name = name,
                             size = size,
                             lastModified = lastModified,

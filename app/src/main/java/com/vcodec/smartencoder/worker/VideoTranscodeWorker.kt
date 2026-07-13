@@ -186,7 +186,8 @@ class VideoTranscodeWorker(
                             sourceUri = sourceUri,
                             keepOriginal = currentTask.keepOriginal,
                             fileName = currentTask.fileName,
-                            originalDates = originalDates
+                            originalDates = originalDates,
+                            sourcePath = currentTask.sourcePath
                         )
                         
                         if (finalUri != null) {
@@ -346,7 +347,8 @@ class VideoTranscodeWorker(
                                 keepOriginal = true, // We MUST use true so it uses MediaStore.insert()
                                 fileName = currentTask.fileName,
                                 originalDates = originalDates,
-                                exactName = deleteSuccess     // Prevents duplicate naming suffix if delete failed
+                                exactName = deleteSuccess,    // Prevents duplicate naming suffix if delete failed
+                                sourcePath = currentTask.sourcePath
                             )
                             
                             if (resolvedUri == null) {
@@ -358,7 +360,8 @@ class VideoTranscodeWorker(
                                     keepOriginal = true,
                                     fileName = currentTask.fileName,
                                     originalDates = originalDates,
-                                    exactName = false // allows _compressed suffix
+                                    exactName = false, // allows _compressed suffix
+                                    sourcePath = currentTask.sourcePath
                                 ) ?: throw java.io.IOException("Failed to create even a recovery MediaStore entry")
                                 
                                 finalUri = recoveryUri
@@ -382,7 +385,8 @@ class VideoTranscodeWorker(
                                     keepOriginal = true,
                                     fileName = currentTask.fileName,
                                     originalDates = originalDates,
-                                    exactName = false
+                                    exactName = false,
+                                    sourcePath = currentTask.sourcePath
                                 ) ?: throw java.io.IOException("Recovery path failed to create MediaStore entry", e)
                                 
                                 context.contentResolver.openOutputStream(recoveryUri)?.use { outputStream ->
