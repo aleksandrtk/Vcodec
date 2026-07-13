@@ -215,7 +215,8 @@ object MetadataRestorer {
             // Fallback: update by display name match
             val displayName = getDisplayName(context, destUri)
             if (displayName != null) {
-                restoreMediaStoreDatesByName(context, displayName, originalDates)
+                val relativePath = extractRelativePathFromMediaStore(context, destUri)
+                restoreMediaStoreDatesByName(context, displayName, relativePath, originalDates)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception restoring dates in MediaStore: ${e.message}", e)
@@ -273,10 +274,45 @@ object MetadataRestorer {
     }
 
     /**
-     * Updates file dates in MediaStore by display name match. 
+     * Finds the exact MediaStore URI matching display name and optionally relative path.
+     */
+    fun findMediaStoreUri(context: Context, displayName: String, relativePath: String?): Uri? {
+        val projection = arrayOf(MediaStore.Video.VideoColumns._ID)
+        var selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ?"
+        var args = arrayOf(displayName)
+        
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !relativePath.isNullOrEmpty()) {
+            val cleanRelPath = relativePath.trim('/').let { if (it.isEmpty()) "" else "$it/" }
+            if (cleanRelPath.isNotEmpty()) {
+                selection += " AND ${MediaStore.Video.VideoColumns.RELATIVE_PATH} = ?"
+                args = arrayOf(displayName, cleanRelPath)
+            }
+        }
+        
+        try {
+            context.contentResolver.query(
+                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                selection,
+                args,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns._ID))
+                    return Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id.toString())
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to find MediaStore URI by name and relative path: ${e.message}")
+        }
+        return null
+    }
+
+    /**
+     * Updates file dates in MediaStore by display name and relative path match. 
      * Highly robust for background/retroactive updates where active SAF URIs are unavailable.
      */
-    fun restoreMediaStoreDatesByName(context: Context, displayName: String, originalDates: FileDates): Boolean {
+    fun restoreMediaStoreDatesByName(context: Context, displayName: String, relativePath: String?, originalDates: FileDates): Boolean {
         try {
             val values = ContentValues().apply {
                 put(MediaStore.Video.VideoColumns.DATE_MODIFIED, originalDates.dateModifiedSec)
@@ -287,14 +323,35 @@ object MetadataRestorer {
                     put(MediaStore.Video.VideoColumns.DATE_TAKEN, originalDates.dateTakenMs)
                 }
             }
-            val selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ?"
+            
+            // Try direct URI update first
+            val resolvedUri = findMediaStoreUri(context, displayName, relativePath)
+            if (resolvedUri != null) {
+                val rows = context.contentResolver.update(resolvedUri, values, null, null)
+                if (rows > 0) {
+                    Log.i(TAG, "Restored dates in MediaStore via direct resolved URI for '$displayName' ($rows rows)")
+                    return true
+                }
+            }
+            
+            // Fallback selection query
+            var selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ?"
+            var selectionArgs = arrayOf(displayName)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !relativePath.isNullOrEmpty()) {
+                val cleanRelPath = relativePath.trim('/').let { if (it.isEmpty()) "" else "$it/" }
+                if (cleanRelPath.isNotEmpty()) {
+                    selection += " AND ${MediaStore.Video.VideoColumns.RELATIVE_PATH} = ?"
+                    selectionArgs = arrayOf(displayName, cleanRelPath)
+                }
+            }
+            
             val rows = context.contentResolver.update(
                 MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                 values,
                 selection,
-                arrayOf(displayName)
+                selectionArgs
             )
-            Log.i(TAG, "Restored dates in MediaStore by name '$displayName' ($rows rows)")
+            Log.i(TAG, "Restored dates in MediaStore by name/path '$displayName' ($rows rows)")
             return rows > 0
         } catch (e: Exception) {
             Log.e(TAG, "Exception restoring dates by name: ${e.message}", e)
@@ -380,10 +437,27 @@ object MetadataRestorer {
         val isPickerPath = uri.path?.contains("/picker/") == true
         if (uri.authority == "media" && !isPickerPath) return uri
 
-        // For Photo Picker URIs or other non-MediaStore URIs, resolve by display name
+        // 1. Check if it's a Media Documents Provider URI
+        if (uri.authority == "com.android.providers.media.documents") {
+            try {
+                val docId = android.provider.DocumentsContract.getDocumentId(uri)
+                val split = docId.split(":")
+                if (split.size == 2 && (split[0] == "video" || split[0] == "image")) {
+                    val id = split[1]
+                    return Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                }
+            } catch (e: Exception) { /* ignore */ }
+        }
+
+        // 2. Resolve by display name and relative path
         try {
             val displayName = getDisplayName(context, uri)
             if (displayName != null) {
+                val relativePath = extractRelativePathFromMediaStore(context, uri)
+                val foundUri = findMediaStoreUri(context, displayName, relativePath)
+                if (foundUri != null) return foundUri
+                
+                // Fallback: Query by display name only if relative path matching didn't yield results
                 val projection = arrayOf(MediaStore.Video.VideoColumns._ID)
                 val selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ?"
                 context.contentResolver.query(
@@ -399,20 +473,6 @@ object MetadataRestorer {
                     }
                 }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to resolve MediaStore URI by display name: ${e.message}")
-        }
-
-        // Fallback: try SAF document ID resolution
-        try {
-            val projection = arrayOf(MediaStore.Video.VideoColumns._ID)
-            context.contentResolver.query(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                projection,
-                null,
-                null,
-                null
-            )
         } catch (e: Exception) {
             Log.w(TAG, "Failed to resolve MediaStore URI: ${e.message}")
         }

@@ -131,7 +131,7 @@ object VideoAnalyzer {
     /**
      * Heuristic for determining optimal bitrate for transcoding to HEVC.
      */
-    private fun calculateSuggestedBitrate(
+    internal fun calculateSuggestedBitrate(
         width: Int,
         height: Int,
         frameRate: Int,

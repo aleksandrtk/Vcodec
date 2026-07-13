@@ -475,11 +475,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                             // We MUST also update MediaStore regardless of physical file fix,
                             // otherwise the Gallery still reads the cached 'today' date from the MediaStore database.
+                            val relativePath = try {
+                                com.vcodec.smartencoder.metadata.MetadataRestorer.extractRelativePathFromMediaStore(context, Uri.parse(task.sourceUri))
+                            } catch (_: Exception) { null }
+
                             var mediaStoreRestored = false
 
                             // B) Try updating the original filename (Replace mode)
                             val originalName = task.fileName
-                            if (com.vcodec.smartencoder.metadata.MetadataRestorer.restoreMediaStoreDatesByName(context, originalName, resolvedDates)) {
+                            if (com.vcodec.smartencoder.metadata.MetadataRestorer.restoreMediaStoreDatesByName(context, originalName, relativePath, resolvedDates)) {
                                 mediaStoreRestored = true
                             }
 
@@ -488,7 +492,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 val baseName = task.fileName.substringBeforeLast(".")
                                 val ext = task.fileName.substringAfterLast(".")
                                 val compressedName = "${baseName}_compressed.${ext}"
-                                if (com.vcodec.smartencoder.metadata.MetadataRestorer.restoreMediaStoreDatesByName(context, compressedName, resolvedDates)) {
+                                if (com.vcodec.smartencoder.metadata.MetadataRestorer.restoreMediaStoreDatesByName(context, compressedName, relativePath, resolvedDates)) {
                                     mediaStoreRestored = true
                                 }
                             }
@@ -596,11 +600,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
 
                         // We MUST also update MediaStore regardless of physical file fix.
+                        val relativePath = try {
+                            com.vcodec.smartencoder.metadata.MetadataRestorer.extractRelativePathFromMediaStore(context, Uri.parse(task.sourceUri))
+                        } catch (_: Exception) { null }
+
                         var mediaStoreRestored = false
 
                         // B) Try updating the original filename (Replace mode)
                         val originalName = task.fileName
-                        if (com.vcodec.smartencoder.metadata.MetadataRestorer.restoreMediaStoreDatesByName(context, originalName, resolvedDates)) {
+                        if (com.vcodec.smartencoder.metadata.MetadataRestorer.restoreMediaStoreDatesByName(context, originalName, relativePath, resolvedDates)) {
                             mediaStoreRestored = true
                         }
 
@@ -609,7 +617,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             val baseName = task.fileName.substringBeforeLast(".")
                             val ext = task.fileName.substringAfterLast(".")
                             val compressedName = "${baseName}_compressed.${ext}"
-                            if (com.vcodec.smartencoder.metadata.MetadataRestorer.restoreMediaStoreDatesByName(context, compressedName, resolvedDates)) {
+                            if (com.vcodec.smartencoder.metadata.MetadataRestorer.restoreMediaStoreDatesByName(context, compressedName, relativePath, resolvedDates)) {
                                 mediaStoreRestored = true
                             }
                         }

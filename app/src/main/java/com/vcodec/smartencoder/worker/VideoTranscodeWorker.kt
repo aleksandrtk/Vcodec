@@ -20,6 +20,7 @@ import com.vcodec.smartencoder.utils.ThermalMonitor
 import com.vcodec.smartencoder.utils.TranscodeNotificationController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -32,7 +33,6 @@ class VideoTranscodeWorker(
 
     companion object {
         private const val TAG = "VideoTranscodeWorker"
-        private const val THERMAL_THROTTLE_LIMIT = 45.0f // Celsius
     }
 
     private val db = AppDatabase.getDatabase(context)
@@ -47,12 +47,6 @@ class VideoTranscodeWorker(
             setForeground(getForegroundInfo())
         } catch (e: Exception) {
             Log.e(TAG, "Failed to set foreground service: ${e.message}", e)
-        }
-
-        val temp = ThermalMonitor.getCpuTemperature()
-        if (temp >= THERMAL_THROTTLE_LIMIT) {
-            Log.w(TAG, "Device is too hot ($temp C). Throttling transcode. Will retry later.")
-            return@withContext Result.retry()
         }
 
         val inputTaskId = inputData.getLong("TASK_ID", -1L)
@@ -155,107 +149,66 @@ class VideoTranscodeWorker(
 
             var innerJob: kotlinx.coroutines.Job? = null
             val monitorJob = launch {
-                while (true) {
-                    val task = taskDao.getTaskById(taskId)
-                    if (task == null || task.status == TaskStatus.PAUSED) {
-                        innerJob?.cancel()
-                        break
+                try {
+                    while (isActive) {
+                        val task = taskDao.getTaskById(taskId)
+                        if (task == null || 
+                            task.status == TaskStatus.PAUSED || 
+                            task.status == TaskStatus.FAILED || 
+                            task.status == TaskStatus.COMPLETED) {
+                            innerJob?.cancel()
+                            break
+                        }
+                        val currentTemp = ThermalMonitor.getCpuTemperature()
+                        taskDao.updateTask(task.copy(cpuTemp = currentTemp))
+                        delay(1000)
                     }
-                    val currentTemp = ThermalMonitor.getCpuTemperature()
-                    taskDao.updateTask(task.copy(cpuTemp = currentTemp))
-                    delay(1000)
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    // Normal cancellation
                 }
             }
 
-            var success = false
-            var finalUri: Uri? = null
-            var pfd: ParcelFileDescriptor? = null
-            val tempFile = File(context.cacheDir, "transcoded_${taskId}.mp4")
-
             try {
-                if (tempFile.exists()) tempFile.delete()
-                
-                val outputPath: String
+                var success = false
+                var finalUri: Uri? = null
+                var pfd: ParcelFileDescriptor? = null
+                val tempFile = File(context.cacheDir, "transcoded_${taskId}.mp4")
 
-                // Direct File Descriptor writing optimization
-                if (currentTask.keepOriginal) {
-                    finalUri = MediaStorageManager.createOutputUri(
-                        context = context,
-                        sourceUri = sourceUri,
-                        keepOriginal = currentTask.keepOriginal,
-                        fileName = currentTask.fileName,
-                        originalDates = originalDates
-                    )
+                try {
+                    if (tempFile.exists()) tempFile.delete()
                     
-                    if (finalUri != null) {
-                        pfd = context.contentResolver.openFileDescriptor(finalUri, "rw")
-                        if (pfd != null) {
-                            outputPath = "/proc/self/fd/${pfd.fd}"
+                    val outputPath: String
+
+                    // Direct File Descriptor writing optimization
+                    if (currentTask.keepOriginal) {
+                        finalUri = MediaStorageManager.createOutputUri(
+                            context = context,
+                            sourceUri = sourceUri,
+                            keepOriginal = currentTask.keepOriginal,
+                            fileName = currentTask.fileName,
+                            originalDates = originalDates
+                        )
+                        
+                        if (finalUri != null) {
+                            pfd = context.contentResolver.openFileDescriptor(finalUri, "rw")
+                            if (pfd != null) {
+                                outputPath = "/proc/self/fd/${pfd.fd}"
+                            } else {
+                                outputPath = tempFile.absolutePath
+                            }
                         } else {
                             outputPath = tempFile.absolutePath
                         }
                     } else {
                         outputPath = tempFile.absolutePath
                     }
-                } else {
-                    outputPath = tempFile.absolutePath
-                }
 
-                kotlinx.coroutines.coroutineScope {
-                    innerJob = this.coroutineContext[kotlinx.coroutines.Job]
-                    success = VideoTranscoder.transcodeVideo(
-                        context = context,
-                        inputUri = sourceUri,
-                        outputPath = outputPath,
-                        targetVideoBitrate = calculatedTargetBitrate,
-                        targetCodec = currentTask.targetCodec,
-                        targetWidth = currentTask.targetWidth,
-                        targetHeight = currentTask.targetHeight,
-                        originalWidth = currentTask.originalWidth,
-                        originalHeight = currentTask.originalHeight,
-                        isHdr = isHdr,
-                        forceSdr = false,
-                        listener = object : VideoTranscoder.ProgressListener {
-                            override fun onProgress(progress: Float) {
-                                launch {
-                                    val task = taskDao.getTaskById(taskId)
-                                    if (task != null) {
-                                        taskDao.updateTask(task.copy(progress = progress))
-                                    }
-                                    setForeground(TranscodeNotificationController.createForegroundInfo(context, progress, "Compressing ${currentTask?.fileName ?: ""}"))
-                                }
-                            }
-                        }
-                    )
-                }
-                
-                // Close PFD to flush data
-                pfd?.close()
-
-            } catch (e: Exception) {
-                pfd?.close()
-                if (e is kotlinx.coroutines.CancellationException) {
-                    Log.i(TAG, "Transcoding aborted.")
-                    tempFile.delete()
-                    return@withContext Result.retry() // Ensure it goes back to pending/paused properly based on DB status
-                }
-                val errorMsg = e.message ?: ""
-                val causeMsg = e.cause?.message ?: ""
-                val isGlExtError = errorMsg.contains("GL_EXT_YUV_target") || 
-                                   causeMsg.contains("GL_EXT_YUV_target") ||
-                                   errorMsg.contains("Video frame processing error")
-
-                if (isGlExtError) {
-                    Log.w(TAG, "GL_EXT_YUV_target not supported by GPU. Retrying with SDR fallback...")
-                    if (tempFile.exists()) tempFile.delete()
-                    
-                    // Fallback must use tempFile, since pfd is closed or invalid
                     kotlinx.coroutines.coroutineScope {
                         innerJob = this.coroutineContext[kotlinx.coroutines.Job]
                         success = VideoTranscoder.transcodeVideo(
                             context = context,
                             inputUri = sourceUri,
-                            outputPath = tempFile.absolutePath,
+                            outputPath = outputPath,
                             targetVideoBitrate = calculatedTargetBitrate,
                             targetCodec = currentTask.targetCodec,
                             targetWidth = currentTask.targetWidth,
@@ -263,7 +216,7 @@ class VideoTranscodeWorker(
                             originalWidth = currentTask.originalWidth,
                             originalHeight = currentTask.originalHeight,
                             isHdr = isHdr,
-                            forceSdr = true,
+                            forceSdr = false,
                             listener = object : VideoTranscoder.ProgressListener {
                                 override fun onProgress(progress: Float) {
                                     launch {
@@ -271,127 +224,210 @@ class VideoTranscodeWorker(
                                         if (task != null) {
                                             taskDao.updateTask(task.copy(progress = progress))
                                         }
-                                        setForeground(TranscodeNotificationController.createForegroundInfo(context, progress, "Compressing (SDR Fallback) ${currentTask?.fileName ?: ""}"))
+                                        setForeground(TranscodeNotificationController.createForegroundInfo(context, progress, "Compressing ${currentTask?.fileName ?: ""}"))
                                     }
                                 }
                             }
                         )
                     }
-                } else {
-                    throw e
+                    
+                    // Close PFD to flush data
+                    pfd?.close()
+
+                } catch (e: Exception) {
+                    pfd?.close()
+                    if (e is kotlinx.coroutines.CancellationException) {
+                        Log.i(TAG, "Transcoding aborted.")
+                        tempFile.delete()
+                        return@withContext Result.retry() // Ensure it goes back to pending/paused properly based on DB status
+                    }
+                    val errorMsg = e.message ?: ""
+                    val causeMsg = e.cause?.message ?: ""
+                    val isGlExtError = errorMsg.contains("GL_EXT_YUV_target") || 
+                                       causeMsg.contains("GL_EXT_YUV_target") ||
+                                       errorMsg.contains("Video frame processing error")
+
+                    if (isGlExtError) {
+                        Log.w(TAG, "GL_EXT_YUV_target not supported by GPU. Retrying with SDR fallback...")
+                        if (tempFile.exists()) tempFile.delete()
+                        
+                        // Fallback must use tempFile, since pfd is closed or invalid
+                        kotlinx.coroutines.coroutineScope {
+                            innerJob = this.coroutineContext[kotlinx.coroutines.Job]
+                            success = VideoTranscoder.transcodeVideo(
+                                context = context,
+                                inputUri = sourceUri,
+                                outputPath = tempFile.absolutePath,
+                                targetVideoBitrate = calculatedTargetBitrate,
+                                targetCodec = currentTask.targetCodec,
+                                targetWidth = currentTask.targetWidth,
+                                targetHeight = currentTask.targetHeight,
+                                originalWidth = currentTask.originalWidth,
+                                originalHeight = currentTask.originalHeight,
+                                isHdr = isHdr,
+                                forceSdr = true,
+                                listener = object : VideoTranscoder.ProgressListener {
+                                    override fun onProgress(progress: Float) {
+                                        launch {
+                                            val task = taskDao.getTaskById(taskId)
+                                            if (task != null) {
+                                                taskDao.updateTask(task.copy(progress = progress))
+                                            }
+                                            setForeground(TranscodeNotificationController.createForegroundInfo(context, progress, "Compressing (SDR Fallback) ${currentTask?.fileName ?: ""}"))
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    } else {
+                        throw e
+                    }
                 }
-            }
 
-            monitorJob.cancel()
+                if (success) {
+                    var compressedSize = 0L
 
-            if (success) {
-                var compressedSize = 0L
-
-                if (currentTask.keepOriginal) {
-                    if (finalUri != null) {
-                        // If we fell back to temp file due to FD error, copy it now
-                        if (tempFile.exists() && tempFile.length() > 0) {
-                            context.contentResolver.openOutputStream(finalUri)?.use { outputStream ->
-                                FileInputStream(tempFile).use { inputStream ->
-                                    inputStream.copyTo(outputStream)
+                    if (currentTask.keepOriginal) {
+                        if (finalUri != null) {
+                            // If we fell back to temp file due to FD error, copy it now
+                            if (tempFile.exists() && tempFile.length() > 0) {
+                                context.contentResolver.openOutputStream(finalUri)?.use { outputStream ->
+                                    FileInputStream(tempFile).use { inputStream ->
+                                        inputStream.copyTo(outputStream)
+                                    }
                                 }
                             }
-                        }
-                        
-                        // Restore Physical POSIX Dates via C++ NDK BEFORE finalizing
-                        MetadataRestorer.restoreAllMetadata(
-                            context = context,
-                            sourceUri = sourceUri,
-                            destUri = finalUri,
-                            sourcePath = currentTask.sourcePath,
-                            destPath = finalUri.path,
-                            originalDates = originalDates
-                        )
+                            
+                            // Restore Physical POSIX Dates via C++ NDK BEFORE finalizing
+                            MetadataRestorer.restoreAllMetadata(
+                                context = context,
+                                sourceUri = sourceUri,
+                                destUri = finalUri,
+                                sourcePath = currentTask.sourcePath,
+                                destPath = finalUri.path,
+                                originalDates = originalDates
+                            )
 
-                        MediaStorageManager.finalizePendingUri(context, finalUri, originalDates)
-                        compressedSize = MediaStorageManager.getUriSize(context, finalUri)
-                    }
-                } else {
-                    // Replace original file content directly
-                    // STRATEGY: Android 11+ prevents updating DATE_ADDED/DATE_MODIFIED for files we don't own.
-                    // Overwriting the file in-place triggers FUSE/MediaScanner to reset the dates to "now".
-                    // Since we can't update them back, the file jumps to the top of Samsung Gallery.
-                    // SOLUTION: Copy metadata to tempFile -> Delete original file -> Insert a new file with the exact same name.
-                    // We become the OWNER of the new file, allowing us to perfectly set the dates via finalizePendingUri!
-                    
-                    if (tempFile.exists() && tempFile.length() > 0) {
-                        // 1. Copy custom metadata boxes from original to tempFile BEFORE deleting original
-                        MetadataRestorer.restoreAllMetadata(
-                            context = context,
-                            sourceUri = sourceUri,
-                            destUri = android.net.Uri.fromFile(tempFile),
-                            sourcePath = currentTask.sourcePath,
-                            destPath = tempFile.absolutePath,
-                            originalDates = originalDates
-                        )
-                        
-                        // 2. Delete the original file entirely
-                        try {
-                            android.provider.DocumentsContract.deleteDocument(context.contentResolver, sourceUri)
-                        } catch (e: Exception) {
-                            try {
-                                context.contentResolver.delete(sourceUri, null, null)
-                            } catch (e2: Exception) {
-                                Log.e(TAG, "Failed to delete original file: ${e2.message}")
-                            }
+                            MediaStorageManager.finalizePendingUri(context, finalUri, originalDates)
+                            compressedSize = MediaStorageManager.getUriSize(context, finalUri)
                         }
-                        
-                        // 3. Create a brand new file with the EXACT same name
-                        finalUri = MediaStorageManager.createOutputUri(
-                            context = context,
-                            sourceUri = sourceUri,
-                            keepOriginal = true, // We MUST use true so it uses MediaStore.insert()
-                            fileName = currentTask.fileName,
-                            originalDates = originalDates,
-                            exactName = true     // Prevents appending "_compressed"
-                        ) ?: sourceUri
-                        
-                        // 4. Copy the transcoded content to the new file
-                        context.contentResolver.openOutputStream(finalUri)?.use { outputStream ->
-                            FileInputStream(tempFile).use { inputStream ->
-                                inputStream.copyTo(outputStream)
-                            }
-                        }
-                        
-                        // 5. Finalize the new file. Because WE created it, update() will SUCCEED and perfectly restore the dates!
-                        MediaStorageManager.finalizePendingUri(context, finalUri, originalDates)
                     } else {
-                        finalUri = sourceUri
+                        // Replace original file content directly
+                        // STRATEGY: Copy metadata to tempFile -> Delete original file -> Insert a new file with the exact same name.
+                        if (tempFile.exists() && tempFile.length() > 0) {
+                            // 1. Copy custom metadata boxes from original to tempFile BEFORE deleting original
+                            MetadataRestorer.restoreAllMetadata(
+                                context = context,
+                                sourceUri = sourceUri,
+                                destUri = android.net.Uri.fromFile(tempFile),
+                                sourcePath = currentTask.sourcePath,
+                                destPath = tempFile.absolutePath,
+                                originalDates = originalDates
+                            )
+                            
+                            // 2. Delete the original file entirely
+                            try {
+                                android.provider.DocumentsContract.deleteDocument(context.contentResolver, sourceUri)
+                            } catch (e: Exception) {
+                                try {
+                                    context.contentResolver.delete(sourceUri, null, null)
+                                } catch (e2: Exception) {
+                                    Log.e(TAG, "Failed to delete original file: ${e2.message}")
+                                }
+                            }
+                            
+                            // 3. Create a brand new file with the EXACT same name
+                            val resolvedUri = MediaStorageManager.createOutputUri(
+                                context = context,
+                                sourceUri = sourceUri,
+                                keepOriginal = true, // We MUST use true so it uses MediaStore.insert()
+                                fileName = currentTask.fileName,
+                                originalDates = originalDates,
+                                exactName = true     // Prevents appending "_compressed"
+                            )
+                            
+                            if (resolvedUri == null) {
+                                // Fallback 1: Try to create a recovery file with a modified name
+                                Log.e(TAG, "Failed to create exact name URI. Trying recovery fallback...")
+                                val recoveryUri = MediaStorageManager.createOutputUri(
+                                    context = context,
+                                    sourceUri = sourceUri,
+                                    keepOriginal = true,
+                                    fileName = currentTask.fileName,
+                                    originalDates = originalDates,
+                                    exactName = false // allows _compressed suffix
+                                ) ?: throw java.io.IOException("Failed to create even a recovery MediaStore entry")
+                                
+                                finalUri = recoveryUri
+                            } else {
+                                finalUri = resolvedUri
+                            }
+                            
+                            // 4. Copy the transcoded content to the new file
+                            try {
+                                context.contentResolver.openOutputStream(finalUri!!)?.use { outputStream ->
+                                    FileInputStream(tempFile).use { inputStream ->
+                                        inputStream.copyTo(outputStream)
+                                    }
+                                } ?: throw java.io.IOException("Failed to open output stream for final URI: $finalUri")
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to write to finalUri ($finalUri). Trying recovery fallback...", e)
+                                // Fallback 2: Try to write to a newly created recovery file
+                                val recoveryUri = MediaStorageManager.createOutputUri(
+                                    context = context,
+                                    sourceUri = sourceUri,
+                                    keepOriginal = true,
+                                    fileName = currentTask.fileName,
+                                    originalDates = originalDates,
+                                    exactName = false
+                                ) ?: throw java.io.IOException("Recovery path failed to create MediaStore entry", e)
+                                
+                                context.contentResolver.openOutputStream(recoveryUri)?.use { outputStream ->
+                                    FileInputStream(tempFile).use { inputStream ->
+                                        inputStream.copyTo(outputStream)
+                                    }
+                                } ?: throw java.io.IOException("Recovery path failed to open output stream", e)
+                                
+                                finalUri = recoveryUri
+                            }
+                            
+                            // 5. Finalize the new file
+                            MediaStorageManager.finalizePendingUri(context, finalUri!!, originalDates)
+                        } else {
+                            finalUri = sourceUri
+                        }
+                        
+                        compressedSize = try {
+                            val doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, finalUri!!)
+                            doc?.length() ?: tempFile.length()
+                        } catch (e: Exception) {
+                            tempFile.length()
+                        }
                     }
-                    
-                    compressedSize = try {
-                        val doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, finalUri)
-                        doc?.length() ?: tempFile.length()
-                    } catch (e: Exception) {
-                        tempFile.length()
-                    }
-                }
 
-                val targetFileUri = finalUri!!
-                val completedTask = taskDao.getTaskById(taskId)
-                if (completedTask != null) {
-                    taskDao.updateTask(
-                        completedTask.copy(
-                            status = TaskStatus.COMPLETED,
-                            progress = 1.0f,
-                            compressedSize = compressedSize,
-                            destUri = targetFileUri.toString(),
-                            finishedTimestamp = System.currentTimeMillis()
+                    val targetFileUri = finalUri!!
+                    val completedTask = taskDao.getTaskById(taskId)
+                    if (completedTask != null) {
+                        taskDao.updateTask(
+                            completedTask.copy(
+                                status = TaskStatus.COMPLETED,
+                                progress = 1.0f,
+                                compressedSize = compressedSize,
+                                destUri = targetFileUri.toString(),
+                                finishedTimestamp = System.currentTimeMillis()
+                            )
                         )
-                    )
-                }
+                    }
 
-                tempFile.delete()
-                Log.i(TAG, "Completed Task $taskId successfully.")
-                return@withContext Result.success()
-            } else {
-                markTaskFailed(taskId, "Transcoding completed with failure code.")
-                return@withContext Result.failure()
+                    tempFile.delete()
+                    Log.i(TAG, "Completed Task $taskId successfully.")
+                    return@withContext Result.success()
+                } else {
+                    markTaskFailed(taskId, "Transcoding completed with failure code.")
+                    return@withContext Result.failure()
+                }
+            } finally {
+                monitorJob.cancel()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during transcoding: ${e.message}", e)

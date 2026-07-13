@@ -678,7 +678,7 @@ fun QueueScreen(viewModel: MainViewModel) {
 
         // Active transcode section
         if (activeTask != null) {
-            ActiveTaskCard(activeTask, context)
+            ActiveTaskCard(activeTask, context, viewModel)
             Spacer(modifier = Modifier.height(16.dp))
         }
 
@@ -745,7 +745,7 @@ fun QueueScreen(viewModel: MainViewModel) {
 }
 
 @Composable
-fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context) {
+fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewModel: MainViewModel) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -870,6 +870,48 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context) {
                     color = TextGray,
                     fontSize = 12.sp
                 )
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(Color.Gray.copy(alpha = 0.15f))
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Action Buttons (Pause & Cancel)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(
+                    onClick = { viewModel.pauseTask(task.id) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = AlertAmber)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Pause,
+                        contentDescription = "Pause Task",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Pause", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(modifier = Modifier.width(16.dp))
+                TextButton(
+                    onClick = { viewModel.deleteTask(task.id) },
+                    colors = ButtonDefaults.textButtonColors(contentColor = AlertRed)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Cancel Task",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Cancel", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                }
             }
         }
     }
