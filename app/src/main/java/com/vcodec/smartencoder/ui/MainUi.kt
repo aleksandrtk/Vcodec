@@ -179,21 +179,19 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp,
                     modifier = Modifier.padding(bottom = 12.dp)
-                )
-
-                // 1. Codec choice
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Target Codec", color = TextWhite, fontSize = 14.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                )                // 1. Codec choice
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                    Text("Target Codec", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         listOf("HEVC", "H.264").forEach { codec ->
                             val isSelected = targetCodec == codec
                             SuggestionChip(
                                 onClick = { viewModel.setTargetCodec(codec) },
-                                label = { Text(codec) },
+                                label = { Text(codec, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center) },
+                                modifier = Modifier.weight(1f),
                                 colors = SuggestionChipDefaults.suggestionChipColors(
                                     containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
                                     labelColor = if (isSelected) PrimaryCyan else TextGray
@@ -204,18 +202,18 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                 }
 
                 // 2. Resolution choice
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Resolution", color = TextWhite, fontSize = 14.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+                    Text("Resolution", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         listOf("Original", "1080p", "720p").forEach { res ->
                             val isSelected = targetResolution == res
                             SuggestionChip(
                                 onClick = { viewModel.setTargetResolution(res) },
-                                label = { Text(res) },
+                                label = { Text(res, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center) },
+                                modifier = Modifier.weight(1f),
                                 colors = SuggestionChipDefaults.suggestionChipColors(
                                     containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
                                     labelColor = if (isSelected) PrimaryCyan else TextGray
@@ -227,29 +225,27 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
 
                 // 3. Quality Preset choice
                 Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
+                    Text("Preset", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("Preset", color = TextWhite, fontSize = 14.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            mapOf(
-                                "SMART" to "Smart",
-                                "HIGH_QUALITY" to "Quality",
-                                "MAX_COMPRESSION" to "Space",
-                                "CUSTOM" to "Custom"
-                            ).forEach { (preset, labelText) ->
-                                val isSelected = qualityPreset == preset
-                                SuggestionChip(
-                                    onClick = { viewModel.setQualityPreset(preset) },
-                                    label = { Text(labelText) },
-                                    colors = SuggestionChipDefaults.suggestionChipColors(
-                                        containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
-                                        labelColor = if (isSelected) PrimaryCyan else TextGray
-                                    )
+                        mapOf(
+                            "SMART" to "Smart",
+                            "HIGH_QUALITY" to "Quality",
+                            "MAX_COMPRESSION" to "Space",
+                            "CUSTOM" to "Custom"
+                        ).forEach { (preset, labelText) ->
+                            val isSelected = qualityPreset == preset
+                            SuggestionChip(
+                                onClick = { viewModel.setQualityPreset(preset) },
+                                label = { Text(labelText, modifier = Modifier.fillMaxWidth(), textAlign = androidx.compose.ui.text.style.TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                modifier = Modifier.weight(1f),
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = if (isSelected) PrimaryCyan.copy(alpha = 0.2f) else Color.Transparent,
+                                    labelColor = if (isSelected) PrimaryCyan else TextGray
                                 )
-                            }
+                            )
                         }
                     }
                     val presetDescription = when (qualityPreset) {
