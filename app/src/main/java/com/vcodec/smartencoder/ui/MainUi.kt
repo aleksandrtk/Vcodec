@@ -859,11 +859,6 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewMo
                             else -> PrimaryCyan
                         }
                     )
-                    val label = when {
-                        task.cpuTemp > 45.0f -> "Critical Temp"
-                        task.cpuTemp > 40.0f -> "High Temp"
-                        else -> "Normal Temp"
-                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(8.dp))
@@ -871,7 +866,7 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewMo
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            "$label (${String.format(Locale.getDefault(), "%.0f°C", task.cpuTemp)})",
+                            String.format(Locale.getDefault(), "%.0f°C", task.cpuTemp),
                             color = tempColor,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold
