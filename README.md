@@ -8,10 +8,21 @@ The core differentiator of VCodec is its **hardware-level Constant Rate Factor (
 
 ## ⚙️ Hardware Optimization & Processor Support
 
-The application is deeply optimized for mobile system-on-chip (SoC) media pipelines, with a primary focus on **Qualcomm Snapdragon** processors:
-* 🔥 **Snapdragon 8 Gen 3 (Samsung Galaxy S24 Ultra)** — Maximum encoding speed, 10-bit HDR10+ support, and hardware-accelerated HEVC/AV1 pipelines.
-* ⚡ **Snapdragon 888 (Samsung Galaxy S21 5G)** — Balanced HEVC processing with excellent thermal efficiency.
-* 🌡️ **Thermal Safety Throttling**: The pipeline continuously monitors processor temperature via system sensors (`/sys/class/thermal`). If the device heats up, the encoding speed is dynamically throttled to prevent CPU thermal throttling and maintain system stability.
+The application is deeply optimized for mobile system-on-chip (SoC) media pipelines, leveraging low-level hardware `MediaCodec` APIs. It is optimized to perform at maximum efficiency on the following processor architectures:
+
+### 1. Qualcomm Snapdragon Series
+* 🔥 **Snapdragon 8 Gen 1 / Gen 2 / Gen 3** (e.g., Samsung Galaxy S24 Ultra, S23 Ultra, S22 Ultra, OnePlus 12) — Maximum encoding speed, 10-bit HDR10+ support, and hardware-accelerated HEVC/AV1 encoding pipelines.
+* ⚡ **Snapdragon 888 / 870 / 865** (e.g., Samsung Galaxy S21 Ultra, S20 FE, OnePlus 9) — Highly balanced HEVC encoding with optimized macroblock processing and thermal efficiency.
+
+### 2. Samsung Exynos Series
+* 📱 **Exynos 2400 / 2200 / 2100** (e.g., Samsung Galaxy S24/S24+ and S22/S21 European models) — Optimized for Samsung's proprietary MFC (Multi-Format Codec) hardware engines, ensuring stable 4K HEVC rendering.
+* ⚙️ **Exynos 1480 / 1380** (e.g., Samsung Galaxy A55, A54) — Mid-range efficiency profiles designed to balance processing speeds with battery consumption.
+
+### 3. MediaTek Dimensity Series
+* ⚡ **Dimensity 9300 / 9200 / 9000** (e.g., Xiaomi 13T Pro, OnePlus Pad) — Advanced hardware media engine optimization to fully utilize multi-core encoding pipelines.
+
+### 🌡️ Thermal Safety Throttling
+Video encoding is a heavy process that puts continuous load on the CPU and GPU. VCodec monitors the system thermal state in real-time by reading `/sys/class/thermal` sensors. If the processor temperature exceeds safe limits, the encoding pipeline automatically throttles processing speed (dynamic frame delay insertion) to prevent device overheating, protect battery health, and avoid OS-level thermal throttling.
 
 ---
 
@@ -49,22 +60,22 @@ The project follows Clean Architecture guidelines:
 
 ```mermaid
 graph TD
-    UI[Jetpack Compose UI] --> VM[ViewModels State Management]
-    VM --> Repo[Task Repository]
-    Repo --> DB[(Room Database - History & Queue)]
-    Repo --> WM[WorkManager Scheduler]
-    WM --> FGS[Foreground Service Worker]
-    FGS --> Controller[Pipeline Controller]
+    UI["Jetpack Compose UI"] --> VM["ViewModels State Management"]
+    VM --> Repo["Task Repository"]
+    Repo --> DB[("Room Database (History & Queue)")]
+    Repo --> WM["WorkManager Scheduler"]
+    WM --> FGS["Foreground Service Worker"]
+    FGS --> Controller["Pipeline Controller"]
     
     subgraph Native Layer & Hardware Acceleration
-        Controller --> Analyzer[Complexity Analyzer]
-        Controller --> Transcoder[Media3 Transformer / MediaCodec]
-        Controller --> MetaRestorer[C++ Native Metadata Restorer NDK]
+        Controller --> Analyzer["Complexity Analyzer"]
+        Controller --> Transcoder["Media3 Transformer / MediaCodec"]
+        Controller --> MetaRestorer["C++ Native Metadata Restorer (NDK)"]
     end
     
     subgraph OS & Drivers
-        Transcoder --> HW[Snapdragon HEVC Hardware Encoder]
-        Controller --> Sysfs[/sys/class/thermal CPU Temp Monitor]
+        Transcoder --> HW["Hardware Media Encoder (Qualcomm/Exynos/MediaTek)"]
+        Controller --> Sysfs["/sys/class/thermal CPU Temp Monitor"]
     end
 ```
 
