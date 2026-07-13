@@ -174,6 +174,13 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
         }
     }
 
+    val writePermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { _ ->
+        viewModel.addSelectedToQueue()
+        onNavigateToQueue()
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -651,8 +658,30 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                 item {
                     Button(
                         onClick = {
-                            viewModel.addSelectedToQueue()
-                            onNavigateToQueue()
+                            val selectedFiles = scannedFiles.filter { it.isSelected }
+                            val mediaStoreUris = selectedFiles.mapNotNull { file ->
+                                if (file.uri.authority == android.provider.MediaStore.AUTHORITY) {
+                                    file.uri
+                                } else {
+                                    val resolved = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, file.uri)
+                                    if (resolved != null && resolved.authority == android.provider.MediaStore.AUTHORITY) resolved else null
+                                }
+                            }
+
+                            if (!keepOriginal && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && mediaStoreUris.isNotEmpty()) {
+                                try {
+                                    val pendingIntent = android.provider.MediaStore.createWriteRequest(context.contentResolver, mediaStoreUris)
+                                    val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                                    writePermissionLauncher.launch(intentSenderRequest)
+                                } catch (e: Exception) {
+                                    android.util.Log.e("ScannerScreen", "Failed to create write request: ${e.message}")
+                                    viewModel.addSelectedToQueue()
+                                    onNavigateToQueue()
+                                }
+                            } else {
+                                viewModel.addSelectedToQueue()
+                                onNavigateToQueue()
+                            }
                         },
                         enabled = selectedCount > 0,
                         modifier = Modifier

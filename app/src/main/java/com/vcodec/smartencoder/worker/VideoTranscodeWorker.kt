@@ -326,24 +326,27 @@ class VideoTranscodeWorker(
                             )
                             
                             // 2. Delete the original file entirely
+                            var deleteSuccess = false
                             try {
                                 android.provider.DocumentsContract.deleteDocument(context.contentResolver, sourceUri)
+                                deleteSuccess = true
                             } catch (e: Exception) {
                                 try {
-                                    context.contentResolver.delete(sourceUri, null, null)
+                                    val rows = context.contentResolver.delete(sourceUri, null, null)
+                                    deleteSuccess = rows > 0
                                 } catch (e2: Exception) {
                                     Log.e(TAG, "Failed to delete original file: ${e2.message}")
                                 }
                             }
                             
-                            // 3. Create a brand new file with the EXACT same name
+                            // 3. Create a brand new file with the EXACT same name (if delete succeeded)
                             val resolvedUri = MediaStorageManager.createOutputUri(
                                 context = context,
                                 sourceUri = sourceUri,
                                 keepOriginal = true, // We MUST use true so it uses MediaStore.insert()
                                 fileName = currentTask.fileName,
                                 originalDates = originalDates,
-                                exactName = true     // Prevents appending "_compressed"
+                                exactName = deleteSuccess     // Prevents duplicate naming suffix if delete failed
                             )
                             
                             if (resolvedUri == null) {
