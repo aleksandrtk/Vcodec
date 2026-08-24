@@ -51,11 +51,15 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee build_test_output.log
+        run: |
+          set -o pipefail
+          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee build_test_output.log
 
       - name: Build Release and Debug APKs
         if: success()
-        run: ./gradlew assembleRelease assembleDebug --stacktrace 2>&1 | tee build_apk_output.log
+        run: |
+          set -o pipefail
+          ./gradlew assembleRelease assembleDebug --stacktrace 2>&1 | tee build_apk_output.log
 
       - name: Publish failure diagnostics to job summary
         if: failure()
