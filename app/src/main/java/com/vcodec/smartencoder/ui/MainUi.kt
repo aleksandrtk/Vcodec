@@ -154,6 +154,48 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
     }
 }
 
+/**
+ * Small "?" badge that shows an explanation popup when tapped.
+ */
+@Composable
+fun InfoDot(infoText: String) {
+    var showInfo by remember { mutableStateOf(false) }
+    Box {
+        Text(
+            "?",
+            color = PrimaryCyan,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Black,
+            modifier = Modifier
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(PrimaryCyan.copy(alpha = 0.15f))
+                .clickable { showInfo = !showInfo }
+                .padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+        if (showInfo) {
+            androidx.compose.ui.window.Popup(
+                alignment = Alignment.TopStart,
+                onDismissRequest = { showInfo = false }
+            ) {
+                Card(
+                    modifier = Modifier.padding(8.dp).widthIn(max = 280.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.35f))
+                ) {
+                    Text(
+                        infoText,
+                        color = TextGray,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
     val context = LocalContext.current
@@ -167,6 +209,7 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
     val qualityPreset by viewModel.qualityPreset.collectAsState()
     val customBitrateMbps by viewModel.customBitrateMbps.collectAsState()
     val keepOriginal by viewModel.keepOriginal.collectAsState()
+    val sizeEstimates by viewModel.sizeEstimates.collectAsState()
 
     val openFolderLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -305,7 +348,21 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
         } else {
             // File/folder selected! Show files checklist, then settings, pinned Run button at the bottom.
             val selectedCount = scannedFiles.count { it.isSelected }
-            val selectedSizeBytes = scannedFiles.filter { it.isSelected }.sumOf { it.size }
+            val selectedFiles = scannedFiles.filter { it.isSelected }
+            val selectedSizeBytes = selectedFiles.sumOf { it.size }
+            val estimatedTotalBytes = selectedFiles.sumOf { file -> sizeEstimates[file.uri.toString()] ?: 0L }
+            val hasFullEstimate = selectedFiles.isNotEmpty() &&
+                selectedFiles.all { sizeEstimates.containsKey(it.uri.toString()) }
+
+            // Recompute estimates whenever the selection or compression settings change
+            LaunchedEffect(
+                selectedFiles.map { it.uri },
+                qualityPreset,
+                customBitrateMbps,
+                targetResolution
+            ) {
+                viewModel.requestEstimates(selectedFiles)
+            }
             var sortMenuExpanded by remember { mutableStateOf(false) }
             val sortOrder by viewModel.sortOrder.collectAsState()
             val onlyLargeFiles by viewModel.onlyLargeFiles.collectAsState()
@@ -555,12 +612,24 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                                 fontSize = 14.sp
                             )
                             Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                Formatter.formatShortFileSize(context, file.size),
-                                color = TextGray,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    Formatter.formatShortFileSize(context, file.size),
+                                    color = TextGray,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                val estimate = if (file.isSelected) sizeEstimates[file.uri.toString()] else null
+                                if (estimate != null && estimate in 1 until file.size) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "→ ~${Formatter.formatShortFileSize(context, estimate)} (−${(100L - estimate * 100 / file.size)}%)",
+                                        color = Color(0xFF4ADE80),
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -590,7 +659,16 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
 
                             // 1. Codec choice
                             Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                                Text("Target Codec", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Target Codec", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    InfoDot(
+                                        if (targetCodec == "H.264")
+                                            "H.264 (AVC): максимальная совместимость — воспроизводится на любых устройствах, включая старые ТВ и плееры. Файл крупнее при том же качестве."
+                                        else
+                                            "H.265 (HEVC): современный кодек — файл на 40–50% меньше при том же качестве. Поддерживается всеми новыми телефонами; очень старые ТВ/плееры могут не воспроизвести."
+                                    )
+                                }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -612,7 +690,15 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
 
                             // 2. Resolution choice
                             Column(modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-                                Text("Resolution", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Resolution", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    InfoDot(
+                                        "Original: размер кадра не меняется. " +
+                                        "1080p / 720p: кадр уменьшается — деталей меньше, но файл заметно легче. " +
+                                        "Вертикальные видео поворачиваются корректно."
+                                    )
+                                }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -634,7 +720,16 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
 
                             // 3. Quality Preset choice
                             Column(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)) {
-                                Text("Preset", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Preset", color = TextWhite, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    InfoDot(
+                                        "Quality: максимум деталей, экономия меньше (~25–45%). " +
+                                        "Space: агрессивное сжатие, максимальная экономия (~55–75%), качество ниже. " +
+                                        "Custom: задаёшь целевой битрейт слайдером сам. " +
+                                        "Точная оценка показывается у каждого выбранного файла."
+                                    )
+                                }
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -718,7 +813,16 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text("Output Mode", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Output Mode", color = TextWhite, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    InfoDot(
+                                        if (keepOriginal)
+                                            "Save Copy: оригинал остаётся нетронутым, рядом сохраняется сжатая копия. Безопасно, но требует место в 2 раза больше на время операции."
+                                        else
+                                            "Replace Original: оригинал удаляется и заменяется сжатой версией с тем же именем и датой съёмки (файл остаётся на своём месте в галерее). Операция транзакционная: новая копия создаётся и проверяется ДО удаления оригинала."
+                                    )
+                                }
                                 Text(
                                     if (keepOriginal) "Save Copy: Keeps original file" else "Replace Original: Replaces safely",
                                     color = TextGray,
@@ -777,13 +881,23 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                         tint = if (selectedCount > 0) Color.Black else TextGray
                     )
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        if (selectedSizeBytes > 0) "Run ($selectedCount) · ${selectedSizeBytes / (1024 * 1024)} MB"
-                        else "Run ($selectedCount)",
-                        color = if (selectedCount > 0) Color.Black else TextGray,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 16.sp
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            if (selectedSizeBytes > 0) "Run ($selectedCount) · ${selectedSizeBytes / (1024 * 1024)} MB"
+                            else "Run ($selectedCount)",
+                            color = if (selectedCount > 0) Color.Black else TextGray,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 16.sp
+                        )
+                        if (hasFullEstimate && estimatedTotalBytes in 1 until selectedSizeBytes) {
+                            Text(
+                                "≈ ${estimatedTotalBytes / (1024 * 1024)} MB (−${100L - estimatedTotalBytes * 100 / selectedSizeBytes}%)",
+                                color = Color.Black.copy(alpha = 0.65f),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
                 }
             }
             }

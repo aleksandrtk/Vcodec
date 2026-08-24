@@ -482,8 +482,75 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun pauseTask(taskId: Long) = viewModelScope.launch { repository.pauseTask(taskId) }
+    // --- Estimated output size for selected files ---
 
+    /** Lightweight probe result cached per file URI. */
+    private data class EstimateProbe(
+        val suggestedBitrate: Int,
+        val originalBitrate: Int,
+        val durationMs: Long
+    )
+
+    private val _sizeEstimates = MutableStateFlow<Map<String, Long>>(emptyMap())
+    val sizeEstimates: StateFlow<Map<String, Long>> = _sizeEstimates.asStateFlow()
+
+    private val estimateProbeCache = HashMap<String, EstimateProbe?>()
+
+    /**
+     * Estimates the compressed size for each selected file using the SAME bitrate
+     * formula the transcode worker applies, so the prediction matches the result:
+     * estimated bytes = (targetVideoBitrate + 128k audio) / 8 * durationSeconds.
+     * Results stream into [sizeEstimates] as probes complete (fast MediaFormat
+     * metadata reads, no decoding). Unknown files are simply absent from the map.
+     */
+    fun requestEstimates(files: List<ScannedFile>) {
+        if (files.isEmpty()) {
+            _sizeEstimates.value = emptyMap()
+            return
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            val context = getApplication<Application>()
+            val preset = _qualityPreset.value
+            val customBps = (_customBitrateMbps.value * 1_000_000).toInt()
+            val result = LinkedHashMap<String, Long>()
+
+            for (file in files) {
+                val key = file.uri.toString()
+                val probe = synchronized(estimateProbeCache) { estimateProbeCache[key] }
+                    ?: run {
+                        val analyzed = try {
+                            com.vcodec.smartencoder.analyzer.VideoAnalyzer.analyze(context, file.uri)?.let {
+                                EstimateProbe(it.suggestedBitrate, it.bitRate, it.durationMs)
+                            }
+                        } catch (_: Exception) {
+                            null
+                        }
+                        synchronized(estimateProbeCache) { estimateProbeCache[key] = analyzed }
+                        analyzed
+                    }
+
+                if (probe != null) {
+                    // Mirror of VideoTranscodeWorker preset logic
+                    val targetBitrate = when (preset) {
+                        "HIGH_QUALITY" -> (probe.suggestedBitrate * 1.5).toInt()
+                            .coerceAtMost((probe.originalBitrate * 0.9).toInt())
+                        "MAX_COMPRESSION" -> (probe.suggestedBitrate * 0.6).toInt()
+                            .coerceAtLeast(500_000)
+                        "CUSTOM" -> if (customBps > 0) customBps else probe.suggestedBitrate
+                        else -> probe.suggestedBitrate // SMART
+                    }
+                    val seconds = probe.durationMs / 1000.0
+                    if (seconds > 0) {
+                        // Video target + AAC stereo audio (~128 kbps)
+                        result[key] = ((targetBitrate + 128_000) / 8.0 * seconds).toLong()
+                    }
+                }
+                _sizeEstimates.value = result.toMap()
+            }
+        }
+    }
+
+    fun pauseTask(taskId: Long) = viewModelScope.launch { repository.pauseTask(taskId) }
     fun resumeTask(taskId: Long) = viewModelScope.launch { repository.resumeTask(taskId) }
 
     fun deleteTask(taskId: Long) = viewModelScope.launch { repository.deleteTask(taskId) }
