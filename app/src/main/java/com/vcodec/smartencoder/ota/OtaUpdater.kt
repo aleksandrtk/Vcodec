@@ -82,16 +82,19 @@ object OtaUpdater {
      * Examples:
      *   "v1.0.0" -> [1, 0, 0]
      *   "release2.0-stable" -> [2, 0]
+     *   "Release-v2.0.1-beta2" -> [2, 0, 1]
      *   "3.1.4.2" -> [3, 1, 4, 2]
      */
     fun parseVersionNumbers(tag: String): List<Int> {
-        val cleanTag = tag.trim()
-            .removePrefix("release")
-            .removePrefix("Release")
-            .removePrefix("RELEASE")
-            .removePrefix("v")
-            .removePrefix("V")
-            .substringBefore("-") // strips -stable, -beta, etc.
+        // Repeatedly strip release/v prefixes together with any separators,
+        // handling combined forms like "Release-v2.0.1".
+        val prefixRegex = Regex("^(?:release|v)[\\s_\\-.]*", RegexOption.IGNORE_CASE)
+        var cleanTag = tag.trim()
+        while (true) {
+            val match = prefixRegex.find(cleanTag) ?: break
+            cleanTag = cleanTag.substring(match.value.length)
+        }
+        cleanTag = cleanTag.substringBefore("-") // strips -stable, -beta2, etc.
 
         val regex = Regex("\\d+")
         return regex.findAll(cleanTag).mapNotNull { it.value.toIntOrNull() }.toList()

@@ -12,29 +12,28 @@ object MediaStorageManager {
 
     /**
      * Sanitizes and validates a relative storage path against allowed MediaStore roots (Android 10+).
+     * Recovers the allowed root even when the URI carries app/storage prefixes
+     * (e.g. "storage/emulated/0/DCIM/Camera" -> "DCIM/Camera/").
      */
     fun sanitizeRelativePath(rawPath: String?): String {
-        if (rawPath.isNullOrEmpty()) {
+        if (rawPath.isNullOrBlank()) {
             return "Movies/SmartEncoder/"
         }
         val allowedDirectories = listOf("Movies", "DCIM", "Pictures", "Download")
-        val cleanPath = rawPath.trim('/')
-        val primaryDir = cleanPath.substringBefore('/')
+        val segments = rawPath.trim('/')
+            .split('/')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
 
-        val relativePath = if (primaryDir.isEmpty() || !allowedDirectories.any { it.equals(primaryDir, ignoreCase = true) }) {
-            if (cleanPath.contains('/')) {
-                val restOfPath = cleanPath.substringAfter('/')
-                val nextPrimary = restOfPath.substringBefore('/')
-                if (allowedDirectories.any { it.equals(nextPrimary, ignoreCase = true) }) {
-                    restOfPath
-                } else {
-                    "Movies/SmartEncoder"
-                }
-            } else {
-                "Movies/SmartEncoder"
-            }
+        // Find the first allowed MediaStore root anywhere in the path
+        val rootIndex = segments.indexOfFirst { segment ->
+            allowedDirectories.any { it.equals(segment, ignoreCase = true) }
+        }
+
+        val relativePath = if (rootIndex >= 0) {
+            segments.drop(rootIndex).joinToString("/")
         } else {
-            cleanPath
+            "Movies/SmartEncoder"
         }
 
         return if (relativePath.endsWith("/")) relativePath else "$relativePath/"
