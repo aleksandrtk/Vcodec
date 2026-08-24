@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Use MaterialComponents if Material3 is causing resolution issues in XML -->
-    <style name="Theme.SmartEncoder" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+    <!-- Pure Compose app: only a launch theme is needed.
+         Framework Material theme avoids the view-system Material Components dependency. -->
+    <style name="Theme.SmartEncoder" parent="android:Theme.Material.NoActionBar" />
 </resources>
