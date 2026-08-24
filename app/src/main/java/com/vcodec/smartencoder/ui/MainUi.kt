@@ -170,6 +170,78 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
 }
 
 /**
+ * Fullscreen video preview dialog backed by ExoPlayer.
+ * Used to identify a video before adding it to the compression queue.
+ */
+@OptIn(androidx.media3.common.util.UnstableApi::class)
+@Composable
+fun VideoPreviewDialog(uri: android.net.Uri, name: String, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val player = remember(uri) {
+        androidx.media3.exoplayer.ExoPlayer.Builder(context).build().apply {
+            setMediaItem(androidx.media3.common.MediaItem.fromUri(uri))
+            prepare()
+            playWhenReady = true
+        }
+    }
+    DisposableEffect(uri) {
+        onDispose { player.release() }
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xEE070A13))
+                .padding(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    name,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Default.Close, contentDescription = "Close preview", tint = Color.White)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            androidx.compose.ui.viewinterop.AndroidView(
+                factory = { ctx ->
+                    androidx.media3.ui.PlayerView(ctx).apply {
+                        this.player = player
+                        useController = true
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.Black)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                "Preview — the file is not modified",
+                color = Color(0xFF94A3B8),
+                fontSize = 11.sp
+            )
+        }
+    }
+}
+
+/**
  * Small "?" badge that shows an explanation popup when tapped.
  */
 @Composable
@@ -377,6 +449,15 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                 targetResolution
             ) {
                 viewModel.requestEstimates(selectedFiles)
+            }
+
+            var previewFile by remember { mutableStateOf<MainViewModel.ScannedFile?>(null) }
+            previewFile?.let { file ->
+                VideoPreviewDialog(
+                    uri = file.uri,
+                    name = file.name,
+                    onDismiss = { previewFile = null }
+                )
             }
             var sortMenuExpanded by remember { mutableStateOf(false) }
             val sortOrder by viewModel.sortOrder.collectAsState()
@@ -855,6 +936,20 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                                     )
                                 }
                             }
+                        }
+                        // Preview button: play the video before deciding
+                        IconButton(
+                            onClick = { previewFile = file },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(PrimaryCyan.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "Preview video",
+                                tint = PrimaryCyan,
+                                modifier = Modifier.size(22.dp)
+                            )
                         }
                     }
                 }

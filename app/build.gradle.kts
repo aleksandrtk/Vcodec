@@ -12,8 +12,8 @@ android {
         applicationId = "com.vcodec.smartencoder"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "2.5.0"
+        versionCode = 9
+        versionName = "2.6.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -95,6 +95,7 @@ dependencies {
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.common)
     implementation(libs.androidx.media3.effect)
+    implementation(libs.androidx.media3.ui)
 
     // Background Processing
     implementation(libs.androidx.work.runtime.ktx)
