@@ -12,8 +12,8 @@ android {
         applicationId = "com.vcodec.smartencoder"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "2.2.1"
+        versionCode = 6
+        versionName = "2.3.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -28,10 +28,29 @@ android {
         }
     }
 
+    signingConfigs {
+        // CI release signing: stable keystore provided via env vars (GitHub Secrets).
+        // Falls back to the debug key for local development.
+        create("ciRelease") {
+            val ksPath = System.getenv("SIGNING_KEYSTORE_PATH")
+            val ksPassword = System.getenv("SIGNING_KEYSTORE_PASSWORD")
+            val keyAlias = System.getenv("SIGNING_KEY_ALIAS")
+            val keyPassword = System.getenv("SIGNING_KEY_PASSWORD")
+            if (ksPath != null && ksPassword != null && keyAlias != null && keyPassword != null && file(ksPath).exists()) {
+                storeFile = file(ksPath)
+                storePassword = ksPassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+                storeType = "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            val ci = signingConfigs.getByName("ciRelease")
+            signingConfig = if (ci.storeFile != null) ci else signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
