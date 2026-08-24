@@ -326,13 +326,11 @@ class VideoTranscodeWorker(
                             sourcePath = currentTask.sourcePath
                         ) ?: throw java.io.IOException("Failed to create MediaStore entry")
 
-                        // Step 4: Copy verified tempFile to the pending MediaStore URI
+                        // Step 4: Copy verified tempFile to the pending MediaStore URI.
+                        // Returns the exact byte count written — the reliable verification source.
+                        var bytesWritten = 0L
                         try {
-                            context.contentResolver.openOutputStream(targetOutputUri)?.use { outputStream ->
-                                FileInputStream(tempFile).use { inputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                            } ?: throw java.io.IOException("Failed to open output stream for final URI: $targetOutputUri")
+                            bytesWritten = MediaStorageManager.copyFileToUri(context, tempFile, targetOutputUri)
                             finalUri = targetOutputUri
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to write to targetOutputUri ($targetOutputUri). Attempting recovery fallback...", e)
@@ -347,11 +345,7 @@ class VideoTranscodeWorker(
                             )
                             if (recoveryUri != null) {
                                 try {
-                                    context.contentResolver.openOutputStream(recoveryUri)?.use { outputStream ->
-                                        FileInputStream(tempFile).use { inputStream ->
-                                            inputStream.copyTo(outputStream)
-                                        }
-                                    } ?: throw java.io.IOException("Recovery fallback open stream failed", e)
+                                    bytesWritten = MediaStorageManager.copyFileToUri(context, tempFile, recoveryUri)
                                     finalUri = recoveryUri
                                 } catch (copyError: Exception) {
                                     try { context.contentResolver.delete(recoveryUri, null, null) } catch (_: Exception) {}
@@ -364,13 +358,14 @@ class VideoTranscodeWorker(
                             }
                         }
 
-                        // Step 5: Verify the copied data matches the temp file byte-for-byte size
+                        // Step 5: Verify the copy byte-for-byte against the temp file.
+                        // Compares the actual written byte count, NOT the MediaStore SIZE column,
+                        // which is unreliable for IS_PENDING entries (often 0 on Samsung).
                         val writtenUri = finalUri ?: throw java.io.IOException("Target output URI is null after copy")
-                        val copiedSize = MediaStorageManager.getUriSize(context, writtenUri)
-                        if (copiedSize <= 0L || copiedSize != tempFile.length()) {
+                        if (bytesWritten != tempFile.length()) {
                             try { context.contentResolver.delete(writtenUri, null, null) } catch (_: Exception) {}
                             throw java.io.IOException(
-                                "Copied file verification failed (expected ${tempFile.length()} bytes, got $copiedSize). Original kept intact."
+                                "Copied file verification failed (expected ${tempFile.length()} bytes, wrote $bytesWritten). Original kept intact."
                             )
                         }
 
@@ -410,7 +405,7 @@ class VideoTranscodeWorker(
                         )
                         MediaStorageManager.finalizePendingUri(context, writtenUri, originalDates)
 
-                        compressedSize = copiedSize
+                        compressedSize = bytesWritten
                     }
 
                     val targetFileUri = finalUri ?: throw java.io.IOException("Target output URI is null after completion")

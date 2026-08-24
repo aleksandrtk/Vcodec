@@ -117,6 +117,28 @@ object MediaStorageManager {
     }
 
     /**
+     * Copies a file to a content URI and returns the exact number of bytes written.
+     * Byte counting here is the reliable verification source — MediaStore SIZE
+     * queries are unreliable for IS_PENDING entries (often 0 or stale on Samsung).
+     */
+    fun copyFileToUri(context: Context, src: java.io.File, dest: Uri): Long {
+        context.contentResolver.openOutputStream(dest)?.use { outputStream ->
+            src.inputStream().use { inputStream ->
+                val buffer = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val read = inputStream.read(buffer)
+                    if (read == -1) break
+                    outputStream.write(buffer, 0, read)
+                    total += read
+                }
+                outputStream.flush()
+                return total
+            }
+        } ?: throw java.io.IOException("Failed to open output stream: $dest")
+    }
+
+    /**
      * Retrieves the exact physical size of the content at the given URI.
      */
     fun getUriSize(context: Context, uri: Uri): Long {
