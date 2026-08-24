@@ -791,13 +791,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _updateError.value = null
 
             val downloadedFile = com.vcodec.smartencoder.ota.OtaUpdater.downloadApk(
-                context,
-                downloadUrl,
+                context = context,
+                downloadUrl = downloadUrl,
+                onProgress = { progress ->
+                    _downloadProgress.value = progress
+                },
                 expectedSha256 = info.expectedSha256,
                 expectedSizeBytes = info.expectedSizeBytes
-            ) { progress ->
-                _downloadProgress.value = progress
-            }
+            )
 
             _isDownloadingUpdate.value = false
 
