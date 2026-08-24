@@ -303,14 +303,43 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                 )
             }
         } else {
-            // File/folder selected! Show files checklist, then settings, then start button.
+            // File/folder selected! Show files checklist, then settings, pinned Run button at the bottom.
             val selectedCount = scannedFiles.count { it.isSelected }
+            val selectedSizeBytes = scannedFiles.filter { it.isSelected }.sumOf { it.size }
             var sortMenuExpanded by remember { mutableStateOf(false) }
             val sortOrder by viewModel.sortOrder.collectAsState()
             val onlyLargeFiles by viewModel.onlyLargeFiles.collectAsState()
 
+            val onRunClick: () -> Unit = {
+                val selectedFiles = scannedFiles.filter { it.isSelected }
+                val mediaStoreUris = selectedFiles.mapNotNull { file ->
+                    if (file.uri.authority == android.provider.MediaStore.AUTHORITY) {
+                        file.uri
+                    } else {
+                        val resolved = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, file.uri)
+                        if (resolved != null && resolved.authority == android.provider.MediaStore.AUTHORITY) resolved else null
+                    }
+                }
+
+                if (!keepOriginal && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && mediaStoreUris.isNotEmpty()) {
+                    try {
+                        val pendingIntent = android.provider.MediaStore.createWriteRequest(context.contentResolver, mediaStoreUris)
+                        val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                        writePermissionLauncher.launch(intentSenderRequest)
+                    } catch (e: Exception) {
+                        android.util.Log.e("ScannerScreen", "Failed to create write request: ${e.message}")
+                        viewModel.addSelectedToQueue()
+                        onNavigateToQueue()
+                    }
+                } else {
+                    viewModel.addSelectedToQueue()
+                    onNavigateToQueue()
+                }
+            }
+
+            Column(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // Item 1: Active selection info row
@@ -710,54 +739,53 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                     }
                 }
 
-                // Item 7: Start Button
+                // Item 7 (moved): pinned Run button now lives below the list
                 item {
-                    Button(
-                        onClick = {
-                            val selectedFiles = scannedFiles.filter { it.isSelected }
-                            val mediaStoreUris = selectedFiles.mapNotNull { file ->
-                                if (file.uri.authority == android.provider.MediaStore.AUTHORITY) {
-                                    file.uri
-                                } else {
-                                    val resolved = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, file.uri)
-                                    if (resolved != null && resolved.authority == android.provider.MediaStore.AUTHORITY) resolved else null
-                                }
-                            }
-
-                            if (!keepOriginal && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R && mediaStoreUris.isNotEmpty()) {
-                                try {
-                                    val pendingIntent = android.provider.MediaStore.createWriteRequest(context.contentResolver, mediaStoreUris)
-                                    val intentSenderRequest = androidx.activity.result.IntentSenderRequest.Builder(pendingIntent.intentSender).build()
-                                    writePermissionLauncher.launch(intentSenderRequest)
-                                } catch (e: Exception) {
-                                    android.util.Log.e("ScannerScreen", "Failed to create write request: ${e.message}")
-                                    viewModel.addSelectedToQueue()
-                                    onNavigateToQueue()
-                                }
-                            } else {
-                                viewModel.addSelectedToQueue()
-                                onNavigateToQueue()
-                            }
-                        },
-                        enabled = selectedCount > 0,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = PrimaryCyan,
-                            disabledContainerColor = DarkSurface
-                        )
-                    ) {
-                        Text(
-                            "Start Compress ($selectedCount)",
-                            color = if (selectedCount > 0) Color.Black else TextGray,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 16.sp
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                 }
+            }
+
+            // Pinned bottom Run bar: always visible, no scrolling required
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color(0xFF0B1120).copy(alpha = 0f),
+                                Color(0xFF0B1120).copy(alpha = 0.95f)
+                            )
+                        )
+                    )
+                    .padding(top = 24.dp, start = 16.dp, end = 16.dp, bottom = 12.dp)
+            ) {
+                Button(
+                    onClick = onRunClick,
+                    enabled = selectedCount > 0,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = PrimaryCyan,
+                        disabledContainerColor = DarkSurface
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = if (selectedCount > 0) Color.Black else TextGray
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        if (selectedSizeBytes > 0) "Run ($selectedCount) · ${selectedSizeBytes / (1024 * 1024)} MB"
+                        else "Run ($selectedCount)",
+                        color = if (selectedCount > 0) Color.Black else TextGray,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 16.sp
+                    )
+                }
+            }
             }
         }
     }

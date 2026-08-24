@@ -17,9 +17,14 @@ class LargeFileFilterTest {
 
     @Test
     fun `filter enabled excludes files at or below 100 MB`() {
-        assertFalse(MainViewModel.passesSizeFilter(0L, onlyLargeFiles = true))
         assertFalse(MainViewModel.passesSizeFilter(99L * 1024 * 1024, onlyLargeFiles = true))
         assertFalse(MainViewModel.passesSizeFilter(threshold, onlyLargeFiles = true))
+    }
+
+    @Test
+    fun `filter enabled keeps files with unknown size`() {
+        // Samsung Gallery ACTION_PICK may report 0 bytes; such picks must survive the filter
+        assertTrue(MainViewModel.passesSizeFilter(0L, onlyLargeFiles = true))
     }
 
     @Test

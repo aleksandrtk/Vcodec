@@ -31,8 +31,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         /** Emit scanned-list updates to the UI in batches to avoid O(n^2) recomposition storms. */
         private const val SCAN_EMIT_BATCH_SIZE = 20
 
+        /**
+         * Files with unknown size (0 bytes reported by some gallery providers,
+         * e.g. Samsung Gallery ACTION_PICK) always pass the filter — otherwise
+         * freshly picked videos would silently disappear from the list.
+         */
         fun passesSizeFilter(sizeBytes: Long, onlyLargeFiles: Boolean): Boolean =
-            !onlyLargeFiles || sizeBytes > LARGE_FILE_THRESHOLD_BYTES
+            !onlyLargeFiles || sizeBytes <= 0L || sizeBytes > LARGE_FILE_THRESHOLD_BYTES
     }
 
     private val repository = TaskRepository(application)
@@ -68,7 +73,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val scannedFiles: StateFlow<List<ScannedFile>> = combine(_scannedFiles, _sortOrder, _onlyLargeFiles) { files, order, onlyLarge ->
-        val filtered = if (onlyLarge) files.filter { it.size > LARGE_FILE_THRESHOLD_BYTES } else files
+        val filtered = if (onlyLarge) files.filter { passesSizeFilter(it.size, true) } else files
         when (order) {
             SortOrder.NAME_ASC -> filtered.sortedBy { it.name.lowercase() }
             SortOrder.NAME_DESC -> filtered.sortedByDescending { it.name.lowercase() }
