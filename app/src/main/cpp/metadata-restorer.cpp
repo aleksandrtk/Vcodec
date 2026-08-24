@@ -7,6 +7,7 @@
 #include <sys/stat.h>
 #include <cstring>
 #include <cerrno>
+#include <utility>
 #include <endian.h> // For htobe32 and htobe64
 
 #define LOG_TAG "MetadataRestorer"

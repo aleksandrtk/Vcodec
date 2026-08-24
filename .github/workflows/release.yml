@@ -51,10 +51,35 @@ jobs:
         run: chmod +x gradlew
 
       - name: Run unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee build_test_output.log
 
       - name: Build Release and Debug APKs
-        run: ./gradlew assembleRelease assembleDebug --stacktrace
+        if: success()
+        run: ./gradlew assembleRelease assembleDebug --stacktrace 2>&1 | tee build_apk_output.log
+
+      - name: Publish failure diagnostics to job summary
+        if: failure()
+        run: |
+          {
+            echo "## Build failure report"
+            for f in build_test_output.log build_apk_output.log; do
+              if [ -f "$f" ]; then
+                echo "### $f (errors/warnings)"
+                echo '```'
+                grep -nE "error:|Error:|FAILED|FAILURE|Exception|e: " "$f" | head -100 || echo "(no matching lines)"
+                echo '```'
+              fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Also dump the tail of the last log for full context
+          for f in build_test_output.log build_apk_output.log; do
+            if [ -f "$f" ]; then
+              echo "### tail of $f" >> "$GITHUB_STEP_SUMMARY"
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              tail -80 "$f" >> "$GITHUB_STEP_SUMMARY" || true
+              echo '```' >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
 
       # Resolve the release tag:
       #  - tag push  -> the pushed tag itself (github.ref_name)
