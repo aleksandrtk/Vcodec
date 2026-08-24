@@ -774,4 +774,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    // --- OTA Update State Management ---
+    private val _isCheckingUpdate = MutableStateFlow(false)
+    val isCheckingUpdate: StateFlow<Boolean> = _isCheckingUpdate.asStateFlow()
+
+    private val _updateInfo = MutableStateFlow<com.vcodec.smartencoder.ota.OtaUpdater.UpdateInfo?>(null)
+    val updateInfo: StateFlow<com.vcodec.smartencoder.ota.OtaUpdater.UpdateInfo?> = _updateInfo.asStateFlow()
+
+    private val _isDownloadingUpdate = MutableStateFlow(false)
+    val isDownloadingUpdate: StateFlow<Boolean> = _isDownloadingUpdate.asStateFlow()
+
+    private val _downloadProgress = MutableStateFlow(0.0f)
+    val downloadProgress: StateFlow<Float> = _downloadProgress.asStateFlow()
+
+    private val _showUpdateDialog = MutableStateFlow(false)
+    val showUpdateDialog: StateFlow<Boolean> = _showUpdateDialog.asStateFlow()
+
+    private val _updateError = MutableStateFlow<String?>(null)
+    val updateError: StateFlow<String?> = _updateError.asStateFlow()
+
+    fun checkForUpdates(currentVersion: String = "1.0.0", manual: Boolean = true) {
+        viewModelScope.launch {
+            _isCheckingUpdate.value = true
+            _updateError.value = null
+            try {
+                val info = com.vcodec.smartencoder.ota.OtaUpdater.checkForUpdates(currentVersion)
+                _updateInfo.value = info
+                if (manual || info.hasUpdate) {
+                    _showUpdateDialog.value = true
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Check for updates error: ${e.message}", e)
+                _updateError.value = e.message ?: "Failed to check for updates"
+                if (manual) {
+                    _showUpdateDialog.value = true
+                }
+            } finally {
+                _isCheckingUpdate.value = false
+            }
+        }
+    }
+
+    fun startDownloadAndInstall(context: Context) {
+        val info = _updateInfo.value ?: return
+        val downloadUrl = info.downloadUrl
+        if (downloadUrl.isNullOrEmpty()) {
+            if (!info.releaseHtmlUrl.isNullOrEmpty()) {
+                val browserIntent = android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(info.releaseHtmlUrl)).apply {
+                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                context.startActivity(browserIntent)
+            }
+            return
+        }
+
+        viewModelScope.launch {
+            _isDownloadingUpdate.value = true
+            _downloadProgress.value = 0.0f
+            _updateError.value = null
+
+            val downloadedFile = com.vcodec.smartencoder.ota.OtaUpdater.downloadApk(context, downloadUrl) { progress ->
+                _downloadProgress.value = progress
+            }
+
+            _isDownloadingUpdate.value = false
+
+            if (downloadedFile != null && downloadedFile.exists()) {
+                com.vcodec.smartencoder.ota.OtaUpdater.installApk(context, downloadedFile)
+                _showUpdateDialog.value = false
+            } else {
+                _updateError.value = "Failed to download update APK"
+            }
+        }
+    }
+
+    fun dismissUpdateDialog() {
+        _showUpdateDialog.value = false
+    }
 }
