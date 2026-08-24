@@ -405,6 +405,14 @@ class VideoTranscodeWorker(
                         )
                         MediaStorageManager.finalizePendingUri(context, writtenUri, originalDates)
 
+                        // Final chronology assertion: MediaScanner re-syncs DATE_MODIFIED from the
+                        // file mtime when IS_PENDING drops, which pushes the file to the top of the
+                        // gallery. Re-assert the original dates AFTER finalization (same as the
+                        // keep-original branch) so the video stays at its timeline position.
+                        if (originalDates != null) {
+                            MetadataRestorer.restoreMediaStoreDates(context, writtenUri, originalDates)
+                        }
+
                         compressedSize = bytesWritten
                     }
 

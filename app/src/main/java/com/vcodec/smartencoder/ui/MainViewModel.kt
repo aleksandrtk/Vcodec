@@ -318,10 +318,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 repository.addTask(newTask)
             }
 
-            // Clear folder selections after adding to queue
-            _scannedFiles.value = emptyList()
-            _selectedFolderUri.value = null
-            _selectedFolderName.value = null
+            // Keep the folder selection and scanned list so the user can return from
+            // the Queue tab without rescanning; only reset per-file selections.
+            _scannedFiles.value = _scannedFiles.value.map { it.copy(isSelected = false) }
         }
     }
 
