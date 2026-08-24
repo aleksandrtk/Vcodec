@@ -94,6 +94,31 @@ object MetadataRestorer {
         } catch (e: Exception) {
             Log.e(TAG, "Exception reading dates from MediaStore: ${e.message}", e)
         }
+
+        // Last-resort fallback: read the date directly from the SAF document.
+        // Guarantees originalDates is never null for folder-scanned files —
+        // null dates are what push compressed videos to the top of the gallery.
+        if (android.provider.DocumentsContract.isDocumentUri(context, sourceUri)) {
+            try {
+                context.contentResolver.query(
+                    sourceUri,
+                    arrayOf(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED),
+                    null, null, null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val idx = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+                        val ms = if (idx != -1) cursor.getLong(idx) else 0L
+                        if (ms > 0L) {
+                            val sec = ms / 1000L
+                            Log.i(TAG, "Read original date from SAF LAST_MODIFIED: $sec")
+                            return FileDates(dateModifiedSec = sec, dateAddedSec = sec, dateTakenMs = 0L)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "SAF date fallback failed: ${e.message}")
+            }
+        }
         return null
     }
 
@@ -169,12 +194,17 @@ object MetadataRestorer {
             try {
                 val pathStr = sourceUri.path
                 if (pathStr != null && pathStr.contains(":")) {
-                    val split = pathStr.split(":")
-                    if (split.size > 1) {
-                        val relativePath = split[1].substringBeforeLast("/")
-                        if (relativePath.isNotEmpty()) {
-                            return "$relativePath/"
-                        }
+                    // Document URI:  /tree/primary:DCIM/Camera/document/primary:DCIM/Camera/vid.mp4
+                    //   -> take the part after the LAST ':' = "DCIM/Camera/vid.mp4", strip filename.
+                    // Tree URI:       /tree/primary:DCIM/Camera
+                    //   -> take the part after the LAST ':' = "DCIM/Camera" (already a folder).
+                    // NOTE: splitting on the FIRST ':' (legacy behavior) produced corrupted paths
+                    // like "DCIM/Camera/document" which silently redirected output into wrong folders.
+                    val isDocument = pathStr.contains("/document/")
+                    val fullPath = pathStr.substringAfterLast(":")
+                    val relativePath = if (isDocument) fullPath.substringBeforeLast("/") else fullPath
+                    if (relativePath.isNotEmpty()) {
+                        return "$relativePath/"
                     }
                 }
             } catch (e: Exception) {

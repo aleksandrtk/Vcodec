@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -1639,6 +1640,34 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
                 tint = PrimaryCyan
             )
         }
+
+        // Open the gallery video grid (tiles) to visually verify the file's timeline position
+        IconButton(
+            onClick = { openVideoCollectionInGallery(context) },
+            enabled = !isFixing
+        ) {
+            Icon(
+                imageVector = Icons.Default.GridView,
+                contentDescription = "Show in Gallery Grid",
+                tint = AccentEmerald
+            )
+        }
+    }
+}
+
+fun openVideoCollectionInGallery(context: android.content.Context) {
+    try {
+        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+            setDataAndType(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                "video/*"
+            )
+            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(context, "Cannot open gallery: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 

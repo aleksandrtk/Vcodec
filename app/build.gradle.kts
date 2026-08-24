@@ -12,8 +12,8 @@ android {
         applicationId = "com.vcodec.smartencoder"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "2.6.1"
+        versionCode = 11
+        versionName = "2.6.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
