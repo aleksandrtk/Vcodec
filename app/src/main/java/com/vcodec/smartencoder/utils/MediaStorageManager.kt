@@ -11,6 +11,36 @@ import com.vcodec.smartencoder.metadata.MetadataRestorer
 object MediaStorageManager {
 
     /**
+     * Sanitizes and validates a relative storage path against allowed MediaStore roots (Android 10+).
+     */
+    fun sanitizeRelativePath(rawPath: String?): String {
+        if (rawPath.isNullOrEmpty()) {
+            return "Movies/SmartEncoder/"
+        }
+        val allowedDirectories = listOf("Movies", "DCIM", "Pictures", "Download")
+        val cleanPath = rawPath.trim('/')
+        val primaryDir = cleanPath.substringBefore('/')
+
+        val relativePath = if (primaryDir.isEmpty() || !allowedDirectories.any { it.equals(primaryDir, ignoreCase = true) }) {
+            if (cleanPath.contains('/')) {
+                val restOfPath = cleanPath.substringAfter('/')
+                val nextPrimary = restOfPath.substringBefore('/')
+                if (allowedDirectories.any { it.equals(nextPrimary, ignoreCase = true) }) {
+                    restOfPath
+                } else {
+                    "Movies/SmartEncoder"
+                }
+            } else {
+                "Movies/SmartEncoder"
+            }
+        } else {
+            cleanPath
+        }
+
+        return if (relativePath.endsWith("/")) relativePath else "$relativePath/"
+    }
+
+    /**
      * Creates a new pending MediaStore entry or returns the original URI for replacing.
      */
     fun createOutputUri(
@@ -31,31 +61,9 @@ object MediaStorageManager {
         val targetName = if (exactName) fileName else "${baseName}_compressed.$ext"
 
         val rawPath = if (!sourcePath.isNullOrEmpty()) sourcePath else {
-            MetadataRestorer.extractRelativePathFromMediaStore(context, sourceUri) ?: "Movies/SmartEncoder"
+            MetadataRestorer.extractRelativePathFromMediaStore(context, sourceUri)
         }
-        val allowedDirectories = listOf("Movies", "DCIM", "Pictures", "Download")
-        val cleanPath = rawPath.trim('/')
-        val primaryDir = cleanPath.substringBefore('/')
-
-        var originalRelativePath = if (primaryDir.isEmpty() || !allowedDirectories.any { it.equals(primaryDir, ignoreCase = true) }) {
-            if (cleanPath.contains('/')) {
-                val restOfPath = cleanPath.substringAfter('/')
-                val nextPrimary = restOfPath.substringBefore('/')
-                if (allowedDirectories.any { it.equals(nextPrimary, ignoreCase = true) }) {
-                    restOfPath
-                } else {
-                    "Movies/SmartEncoder"
-                }
-            } else {
-                "Movies/SmartEncoder"
-            }
-        } else {
-            cleanPath
-        }
-
-        if (!originalRelativePath.endsWith("/")) {
-            originalRelativePath += "/"
-        }
+        val originalRelativePath = sanitizeRelativePath(rawPath)
 
         val contentValues = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, targetName)

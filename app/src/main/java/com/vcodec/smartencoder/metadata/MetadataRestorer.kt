@@ -70,25 +70,22 @@ object MetadataRestorer {
                 }
             }
 
-            // Fallback: query all video entries and match by display name
+            // Fallback: query video entries and match by display name and relative path
             val displayName = getDisplayName(context, sourceUri)
             if (displayName != null) {
-                val selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ?"
-                context.contentResolver.query(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    projection,
-                    selection,
-                    arrayOf(displayName),
-                    null
-                )?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val dateModified = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns.DATE_MODIFIED))
-                        val dateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns.DATE_ADDED))
-                        val dateTaken = try {
-                            cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns.DATE_TAKEN))
-                        } catch (_: Exception) { 0L }
-                        Log.i(TAG, "Read original dates from MediaStore (by name fallback): modified=$dateModified, added=$dateAdded, taken=$dateTaken")
-                        return FileDates(dateModified, dateAdded, dateTaken)
+                val relativePath = extractRelativePathFromMediaStore(context, sourceUri, resolveFallback = false)
+                val foundUri = findMediaStoreUri(context, displayName, relativePath)
+                if (foundUri != null) {
+                    context.contentResolver.query(foundUri, projection, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val dateModified = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns.DATE_MODIFIED))
+                            val dateAdded = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns.DATE_ADDED))
+                            val dateTaken = try {
+                                cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns.DATE_TAKEN))
+                            } catch (_: Exception) { 0L }
+                            Log.i(TAG, "Read original dates from MediaStore (by disambiguated URI): modified=$dateModified, added=$dateAdded, taken=$dateTaken")
+                            return FileDates(dateModified, dateAdded, dateTaken)
+                        }
                     }
                 }
             }
@@ -283,12 +280,10 @@ object MetadataRestorer {
         var selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ?"
         var args = arrayOf(displayName)
         
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !relativePath.isNullOrEmpty()) {
-            val cleanRelPath = relativePath.trim('/').let { if (it.isEmpty()) "" else "$it/" }
-            if (cleanRelPath.isNotEmpty()) {
-                selection += " AND ${MediaStore.Video.VideoColumns.RELATIVE_PATH} = ?"
-                args = arrayOf(displayName, cleanRelPath)
-            }
+        val cleanRelPath = relativePath?.trim('/')?.let { if (it.isEmpty()) "" else "$it/" }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !cleanRelPath.isNullOrEmpty()) {
+            selection += " AND ${MediaStore.Video.VideoColumns.RELATIVE_PATH} = ?"
+            args = arrayOf(displayName, cleanRelPath)
         }
         
         try {
@@ -300,6 +295,10 @@ object MetadataRestorer {
                 null
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
+                    if (cleanRelPath.isNullOrEmpty() && cursor.count > 1) {
+                        Log.w(TAG, "Ambiguous MediaStore match for '$displayName' (${cursor.count} rows found without relativePath). Skipping lookup to avoid corruption.")
+                        return null
+                    }
                     val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns._ID))
                     return Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id.toString())
                 }
@@ -336,25 +335,20 @@ object MetadataRestorer {
                 }
             }
             
-            // Fallback selection query
-            var selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ?"
-            var selectionArgs = arrayOf(displayName)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !relativePath.isNullOrEmpty()) {
-                val cleanRelPath = relativePath.trim('/').let { if (it.isEmpty()) "" else "$it/" }
-                if (cleanRelPath.isNotEmpty()) {
-                    selection += " AND ${MediaStore.Video.VideoColumns.RELATIVE_PATH} = ?"
-                    selectionArgs = arrayOf(displayName, cleanRelPath)
-                }
+            // Fallback selection query: only if cleanRelPath is non-empty to avoid updating all matching names across all folders
+            val cleanRelPath = relativePath?.trim('/')?.let { if (it.isEmpty()) "" else "$it/" }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q && !cleanRelPath.isNullOrEmpty()) {
+                val selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ? AND ${MediaStore.Video.VideoColumns.RELATIVE_PATH} = ?"
+                val selectionArgs = arrayOf(displayName, cleanRelPath)
+                val rows = context.contentResolver.update(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    values,
+                    selection,
+                    selectionArgs
+                )
+                Log.i(TAG, "Restored dates in MediaStore by name/path '$displayName' in '$cleanRelPath' ($rows rows)")
+                return rows > 0
             }
-            
-            val rows = context.contentResolver.update(
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                values,
-                selection,
-                selectionArgs
-            )
-            Log.i(TAG, "Restored dates in MediaStore by name/path '$displayName' ($rows rows)")
-            return rows > 0
         } catch (e: Exception) {
             Log.e(TAG, "Exception restoring dates by name: ${e.message}", e)
         }
@@ -458,22 +452,6 @@ object MetadataRestorer {
                 val relativePath = extractRelativePathFromMediaStore(context, uri, resolveFallback = false)
                 val foundUri = findMediaStoreUri(context, displayName, relativePath)
                 if (foundUri != null) return foundUri
-                
-                // Fallback: Query by display name only if relative path matching didn't yield results
-                val projection = arrayOf(MediaStore.Video.VideoColumns._ID)
-                val selection = "${MediaStore.Video.VideoColumns.DISPLAY_NAME} = ?"
-                context.contentResolver.query(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    projection,
-                    selection,
-                    arrayOf(displayName),
-                    null
-                )?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.VideoColumns._ID))
-                        return Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id.toString())
-                    }
-                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to resolve MediaStore URI: ${e.message}")

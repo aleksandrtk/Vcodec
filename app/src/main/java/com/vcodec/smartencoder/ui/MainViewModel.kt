@@ -493,9 +493,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         Log.e(TAG, "Failed to query URI metadata: ${e.message}")
                     }
 
+                    val resolvedRelativePath = try {
+                        com.vcodec.smartencoder.metadata.MetadataRestorer.extractRelativePathFromMediaStore(context, uri)
+                    } catch (_: Exception) {
+                        null
+                    }
+
                     val newTask = TranscodeTask(
                         sourceUri = uri.toString(),
-                        sourcePath = null,
+                        sourcePath = resolvedRelativePath,
                         destUri = null,
                         destPath = null,
                         fileName = name,
