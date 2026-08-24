@@ -117,8 +117,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             withContext(Dispatchers.IO) {
                 val list = mutableListOf<ScannedFile>()
                 try {
+                    // ONE bulk MediaStore query instead of per-file lookups:
+                    // per-file resolve+query made scanning O(N) binder calls (very slow on Samsung,
+                    // where SAF LAST_MODIFIED is often 0 for every single video).
+                    val mediaStoreDates = preloadMediaStoreDates(getApplication())
                     val rootId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
-                    scanDirectoryContract(getApplication(), treeUri, rootId, list)
+                    scanDirectoryContract(getApplication(), treeUri, rootId, list, mediaStoreDates)
                 } catch (e: Exception) {
                     Log.e(TAG, "Error scanning folder: ${e.message}", e)
                 }
@@ -129,11 +133,50 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /**
+     * Single bulk query over the whole MediaStore video table:
+     * display name -> last modified millis. O(1) lookups during the SAF walk.
+     */
+    private fun preloadMediaStoreDates(context: Context): Map<String, Long> {
+        val map = HashMap<String, Long>()
+        try {
+            context.contentResolver.query(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(
+                    android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME,
+                    android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
+                    android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
+                ),
+                null, null, null
+            )?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME)
+                val modIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
+                val addIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
+                while (cursor.moveToNext()) {
+                    val name = cursor.getString(nameIdx) ?: continue
+                    val sec = when {
+                        modIdx != -1 && !cursor.isNull(modIdx) && cursor.getLong(modIdx) > 0 -> cursor.getLong(modIdx)
+                        addIdx != -1 && !cursor.isNull(addIdx) && cursor.getLong(addIdx) > 0 -> cursor.getLong(addIdx)
+                        else -> 0L
+                    }
+                    if (sec > 0) {
+                        val key = name.lowercase()
+                        if (!map.containsKey(key)) map[key] = sec * 1000L
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "MediaStore date preload failed: ${e.message}")
+        }
+        return map
+    }
+
     private fun scanDirectoryContract(
         context: Context,
         treeUri: Uri,
         documentId: String,
-        list: MutableList<ScannedFile>
+        list: MutableList<ScannedFile>,
+        mediaStoreDates: Map<String, Long>
     ) {
         val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId)
         val projection = arrayOf(
@@ -159,40 +202,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val size = cursor.getLong(sizeIndex)
                         var lastModified = if (dateIndex != -1) cursor.getLong(dateIndex) else 0L
                         if (lastModified == 0L) {
-                            try {
-                                val fileUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                                val resolvedUri = com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, fileUri)
-                                if (resolvedUri != null) {
-                                    context.contentResolver.query(
-                                        resolvedUri,
-                                        arrayOf(
-                                            android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
-                                            android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
-                                        ),
-                                        null, null, null
-                                    )?.use { c ->
-                                        if (c.moveToFirst()) {
-                                            val modIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
-                                            val addIdx = c.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
-                                            val sec = when {
-                                                modIdx != -1 && !c.isNull(modIdx) -> c.getLong(modIdx)
-                                                addIdx != -1 && !c.isNull(addIdx) -> c.getLong(addIdx)
-                                                else -> 0L
-                                            }
-                                            if (sec > 0L) {
-                                                lastModified = sec * 1000L
-                                            }
-                                        }
-                                    }
-                                }
-                            } catch (_: Exception) {}
+                            // O(1) lookup from the preloaded MediaStore map (bulk-queried once)
+                            lastModified = mediaStoreDates[name.lowercase()] ?: 0L
                         }
                         if (lastModified == 0L) {
                             lastModified = System.currentTimeMillis()
                         }
 
                         if (mimeType == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
-                            scanDirectoryContract(context, treeUri, childId, list)
+                            scanDirectoryContract(context, treeUri, childId, list, mediaStoreDates)
                         } else {
                             val isMp4 = name.endsWith(".mp4", ignoreCase = true) || 
                                         (mimeType.contains("video", ignoreCase = true) && !name.endsWith(".gif", ignoreCase = true))

@@ -88,18 +88,17 @@ jobs:
           set -o pipefail
           ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee build_test_output.log
 
-      - name: Build Release and Debug APKs
+      - name: Build Release APK
         if: success()
         run: |
           set -o pipefail
-          ./gradlew assembleRelease assembleDebug --stacktrace 2>&1 | tee build_apk_output.log
+          ./gradlew assembleRelease --stacktrace 2>&1 | tee build_apk_output.log
 
-      - name: Prepare APK artifacts
+      - name: Prepare APK artifact
         run: |
           mkdir -p release_assets
           SUFFIX="${{ steps.meta.outputs.suffix }}"
           cp app/build/outputs/apk/release/app-release.apk "release_assets/VCodec-release-${SUFFIX}.apk"
-          cp app/build/outputs/apk/debug/app-debug.apk     "release_assets/VCodec-debug-${SUFFIX}.apk"
           ls -la release_assets
 
       # Testable APK is ALWAYS uploaded, on every branch and every push
