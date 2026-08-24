@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 jobs:
   build-and-release:
@@ -63,27 +64,59 @@ jobs:
 
       - name: Publish failure diagnostics to job summary
         if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           {
             echo "## Build failure report"
             for f in build_test_output.log build_apk_output.log; do
               if [ -f "$f" ]; then
-                echo "### $f (errors/warnings)"
+                echo "### $f (errors)"
                 echo '```'
-                grep -nE "error:|Error:|FAILED|FAILURE|Exception|e: " "$f" | head -100 || echo "(no matching lines)"
+                grep -nE "error:|Error:|FAILED|FAILURE|Exception|e: " "$f" | head -100 || echo "(no matches)"
+                echo '```'
+                echo "### tail of $f"
+                echo '```'
+                tail -60 "$f" || true
                 echo '```'
               fi
             done
           } >> "$GITHUB_STEP_SUMMARY"
-          # Also dump the tail of the last log for full context
+
+          # Mirror key error lines into annotations (readable via API)
           for f in build_test_output.log build_apk_output.log; do
             if [ -f "$f" ]; then
-              echo "### tail of $f" >> "$GITHUB_STEP_SUMMARY"
-              echo '```' >> "$GITHUB_STEP_SUMMARY"
-              tail -80 "$f" >> "$GITHUB_STEP_SUMMARY" || true
-              echo '```' >> "$GITHUB_STEP_SUMMARY"
+              grep -E "error:|e: |FAILURE|Exception" "$f" | head -25 | while IFS= read -r line; do
+                echo "::error::${line:0:500}"
+              done
             fi
           done
+          exit 0
+
+      - name: Create failure issue with full logs
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY="/tmp/opencode/ci_failure_body.md" || BODY="ci_failure_body.md"
+          BODY="$(pwd)/ci_failure_body.md"
+          {
+            echo "CI failed on commit ${GITHUB_SHA}"
+            echo "Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            for f in build_test_output.log build_apk_output.log; do
+              if [ -f "$f" ]; then
+                echo "## tail of $f"
+                echo '```'
+                tail -c 25000 "$f" || true
+                echo
+                echo '```'
+              fi
+            done
+          } > "$BODY"
+          gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "CI build failure (${GITHUB_SHA::7})" \
+            --body-file "$BODY" || true
 
       # Resolve the release tag:
       #  - tag push  -> the pushed tag itself (github.ref_name)
