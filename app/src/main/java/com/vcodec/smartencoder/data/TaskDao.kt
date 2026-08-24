@@ -25,6 +25,12 @@ interface TaskDao {
     @Update
     suspend fun updateTask(task: TranscodeTask)
 
+    @Query("UPDATE transcode_tasks SET progress = :progress WHERE id = :id")
+    suspend fun updateProgress(id: Long, progress: Float)
+
+    @Query("UPDATE transcode_tasks SET cpuTemp = :temp WHERE id = :id")
+    suspend fun updateCpuTemp(id: Long, temp: Float)
+
     @Delete
     suspend fun deleteTask(task: TranscodeTask)
 

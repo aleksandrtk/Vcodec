@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <cstring>
+#include <cerrno>
 #include <endian.h> // For htobe32 and htobe64
 
 #define LOG_TAG "MetadataRestorer"
@@ -57,16 +58,25 @@ struct Mp4Box {
     uint64_t offset;
 };
 
+// Maximum bytes we are ever willing to buffer in memory for a single box.
+// Legitimate udta/meta boxes are a few KB; 16 MB is a generous safety ceiling
+// that prevents OOM from corrupt 'size' fields (which can claim up to 4 GB).
+static const uint64_t MAX_BOX_BUFFER_BYTES = 16ULL * 1024ULL * 1024ULL;
+
 // Reads root-level boxes of an MP4 file
 std::vector<Mp4Box> parse_root_boxes(FILE* f) {
     std::vector<Mp4Box> boxes;
-    fseek(f, 0, SEEK_END);
-    uint64_t file_size = ftell(f);
-    fseek(f, 0, SEEK_SET);
+    if (!f) return boxes;
+
+    if (fseek(f, 0, SEEK_END) != 0) return boxes;
+    long tell_end = ftell(f);
+    if (tell_end < 0) return boxes;
+    uint64_t file_size = (uint64_t)tell_end;
+    if (fseek(f, 0, SEEK_SET) != 0) return boxes;
 
     uint64_t offset = 0;
-    while (offset < file_size) {
-        fseek(f, offset, SEEK_SET);
+    while (offset + 8 <= file_size) {
+        if (fseek(f, offset, SEEK_SET) != 0) break;
         uint64_t size = read_u32_be(f);
         char type[4];
         if (fread(type, 1, 4, f) != 4) break;
@@ -79,6 +89,14 @@ std::vector<Mp4Box> parse_root_boxes(FILE* f) {
             size = file_size - offset;
         }
 
+        // Corrupt box: size must at least cover its own header and stay inside the file
+        if (size < header_size || offset + size > file_size) {
+            LOGE("Corrupt root box at offset %llu (size %llu, file %llu). Stopping parse.",
+                 (unsigned long long)offset, (unsigned long long)size,
+                 (unsigned long long)file_size);
+            break;
+        }
+
         Mp4Box box;
         box.size = size;
         memcpy(box.type, type, 4);
@@ -87,9 +105,26 @@ std::vector<Mp4Box> parse_root_boxes(FILE* f) {
 
         boxes.push_back(box);
         offset += size;
-        if (size == 0) break; // Avoid infinite loops if corrupt size
     }
     return boxes;
+}
+
+/**
+ * Reads a whole sub-box of [box_offset, container_end) into memory with validation.
+ * Returns false on truncation or when the box is implausibly large.
+ */
+static bool read_box_checked(FILE* f, uint64_t box_offset, uint32_t declared_size,
+                             uint64_t container_end, std::vector<uint8_t>& out) {
+    if (declared_size < 8) return false;                       // must cover size+type header
+    if ((uint64_t)declared_size > container_end - box_offset) return false; // overruns container
+    if ((uint64_t)declared_size > MAX_BOX_BUFFER_BYTES) {      // implausible allocation
+        LOGE("Box at offset %llu claims %u bytes, exceeding safety limit. Skipping.",
+             (unsigned long long)box_offset, declared_size);
+        return false;
+    }
+    out.resize(declared_size);
+    if (fseek(f, box_offset, SEEK_SET) != 0) return false;
+    return fread(out.data(), 1, declared_size, f) == declared_size;
 }
 
 extern "C"
@@ -154,22 +189,30 @@ Java_com_vcodec_smartencoder_metadata_MetadataRestorer_copyCustomMetadataBoxesFd
 
     std::vector<std::vector<uint8_t>> metadata_boxes_data;
 
-    while (current_offset < src_moov_end) {
+    while (current_offset + 8 <= src_moov_end) {
         fseek(src_file, current_offset, SEEK_SET);
         uint32_t size = read_u32_be(src_file);
         char type[4];
         if (fread(type, 1, 4, src_file) != 4) break;
+        if (size < 8 || current_offset + size > src_moov_end) {
+            LOGE("Corrupt sub-box at moov offset %llu (size %u). Stopping metadata scan.",
+                 (unsigned long long)current_offset, size);
+            break;
+        }
 
         // We want to capture 'udta', 'meta', and custom/proprietary boxes (excluding tracks and headers)
         if (strncmp(type, "udta", 4) == 0 || strncmp(type, "meta", 4) == 0 || 
             (strncmp(type, "trak", 4) != 0 && strncmp(type, "mvhd", 4) != 0 && strncmp(type, "iods", 4) != 0)) {
             
-            LOGI("Found metadata box '%c%c%c%c' (size %d bytes) in source container.", type[0], type[1], type[2], type[3], size);
+            LOGI("Found metadata box '%c%c%c%c' (size %u bytes) in source container.", type[0], type[1], type[2], type[3], size);
             
-            std::vector<uint8_t> box_buffer(size);
-            fseek(src_file, current_offset, SEEK_SET);
-            fread(box_buffer.data(), 1, size, src_file);
-            metadata_boxes_data.push_back(box_buffer);
+            std::vector<uint8_t> box_buffer;
+            if (!read_box_checked(src_file, current_offset, size, src_moov_end, box_buffer)) {
+                LOGE("Failed to read metadata box at offset %llu. Skipping.",
+                     (unsigned long long)current_offset);
+            } else {
+                metadata_boxes_data.push_back(std::move(box_buffer));
+            }
         }
         current_offset += size;
     }
@@ -200,20 +243,29 @@ Java_com_vcodec_smartencoder_metadata_MetadataRestorer_copyCustomMetadataBoxesFd
         uint64_t dest_current = ftell(dest_file);
 
         std::vector<uint8_t> moov_content;
-        while (dest_current < dest_moov_end) {
+        while (dest_current + 8 <= dest_moov_end) {
             fseek(dest_file, dest_current, SEEK_SET);
             uint32_t size = read_u32_be(dest_file);
             char type[4];
             if (fread(type, 1, 4, dest_file) != 4) break;
+            if (size < 8 || dest_current + size > dest_moov_end) {
+                LOGE("Corrupt sub-box at destination moov offset %llu (size %u). Stopping.",
+                     (unsigned long long)dest_current, size);
+                break;
+            }
 
             // Copy non-metadata boxes of target moov (e.g. tracks, mvhd)
             if (strncmp(type, "udta", 4) != 0 && strncmp(type, "meta", 4) != 0) {
-                std::vector<uint8_t> raw_box(size);
-                fseek(dest_file, dest_current, SEEK_SET);
-                fread(raw_box.data(), 1, size, dest_file);
+                std::vector<uint8_t> raw_box;
+                if (!read_box_checked(dest_file, dest_current, size, dest_moov_end, raw_box)) {
+                    LOGE("Failed to read destination box at offset %llu. Skipping.",
+                         (unsigned long long)dest_current);
+                    dest_current += size;
+                    continue;
+                }
                 
                 // INJECT ORIGINAL DATES INTO MVHD
-                if (strncmp(type, "mvhd", 4) == 0 && date_taken_ms > 0) {
+                if (strncmp(type, "mvhd", 4) == 0 && date_taken_ms > 0 && raw_box.size() >= 9) {
                     uint8_t version = raw_box[8];
                     // Apple/MP4 epoch is seconds since Jan 1, 1904. UNIX epoch is Jan 1, 1970.
                     // Difference is 2082844800 seconds.
@@ -248,6 +300,12 @@ Java_com_vcodec_smartencoder_metadata_MetadataRestorer_copyCustomMetadataBoxesFd
         }
 
         // Write the new 'moov' box back to the target file at dest_moov->offset
+        if (moov_content.size() + 8 > 0xFFFFFFFFULL) {
+            LOGE("New moov box would exceed 32-bit size limits. Aborting metadata injection.");
+            fclose(src_file);
+            fclose(dest_file);
+            return JNI_FALSE;
+        }
         fseek(dest_file, dest_moov->offset, SEEK_SET);
         uint32_t new_moov_size = moov_content.size() + 8;
         write_u32_be(dest_file, new_moov_size);

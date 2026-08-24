@@ -11,13 +11,11 @@ data class TranscodeTask(
     val sourceUri: String,          // SAF content URI of input
     val sourcePath: String?,        // Absolute path fallback (for C++ NDK)
     val destUri: String?,           // Target output directory URI
-    val destPath: String?,          // Output path fallback
     val fileName: String,           // Cached file name
     val originalSize: Long,         // In bytes
     val compressedSize: Long = 0L,  // In bytes (updated on completion)
     val status: TaskStatus = TaskStatus.PENDING,
     val progress: Float = 0.0f,     // 0.0 to 1.0
-    val speedFps: Float = 0.0f,     // Transcoding speed (FPS)
     val cpuTemp: Float = 0.0f,      // Temperature log
     val targetBitrate: Int = 0,     // In bps
     val originalBitrate: Int = 0,   // In bps

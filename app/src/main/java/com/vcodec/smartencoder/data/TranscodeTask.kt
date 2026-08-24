@@ -18,7 +18,6 @@ data class TranscodeTask(
     val sourceUri: String,
     val sourcePath: String?,
     val destUri: String?,
-    val destPath: String?,
     val fileName: String,
     val originalSize: Long,
     val compressedSize: Long = 0L,

@@ -49,7 +49,7 @@ Video encoding is a computationally intensive process that puts continuous load 
    Allows setting a manual target bitrate (from **0.5 Mbps to 30.0 Mbps**) via a slider on the settings panel.
 
 4. **Streamlined Workflows**:
-   * **Pick from Gallery (Direct Flow)**: Set compression settings at the top, select files from the gallery, and they are immediately added to the queue for active background compression, redirecting you straight to the **Queue** tab.
+   * **Pick from Gallery**: Select files from the gallery picker; they are added to the queue and you are redirected to the **Queue** tab for background compression.
    * **Scan Entire Folder (Interactive Batch)**: Scan a folder, browse the list of files, select specific videos, adjust settings, and add them to the queue manually.
 
 ---

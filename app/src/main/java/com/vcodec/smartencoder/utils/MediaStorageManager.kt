@@ -128,4 +128,24 @@ object MediaStorageManager {
             0L
         }
     }
+
+    /**
+     * Retrieves the display name of the content at the given URI, or null on failure.
+     */
+    fun getDisplayName(context: Context, uri: Uri): String? {
+        return try {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.Video.Media.DISPLAY_NAME),
+                null, null, null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val idx = cursor.getColumnIndex(MediaStore.Video.Media.DISPLAY_NAME)
+                    if (idx != -1) cursor.getString(idx) else null
+                } else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 }

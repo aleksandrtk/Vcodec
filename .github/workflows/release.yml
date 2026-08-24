@@ -5,12 +5,18 @@ on:
     tags:
       - 'v*'
       - 'release*'
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release Tag Name (e.g. release2.0-stable)'
-        required: true
-        default: 'release2.0-stable'
+        description: 'Release Tag Name (e.g. release2.0-stable). Leave empty to skip publishing.'
+        required: false
+        default: ''
+      publish:
+        description: 'Create GitHub Release with APK'
+        required: false
+        default: 'true'
 
 permissions:
   contents: write
@@ -31,6 +37,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Gradle (with caching)
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Setup Android SDK & NDK
         uses: android-actions/setup-android@v3
 
@@ -41,21 +50,52 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
       - name: Build Release and Debug APKs
-        run: ./gradlew assembleRelease assembleDebug
+        run: ./gradlew assembleRelease assembleDebug --stacktrace
+
+      # Resolve the release tag:
+      #  - tag push  -> the pushed tag itself (github.ref_name)
+      #  - manual    -> the provided input (may be empty = build-only run)
+      #  - branch push -> empty = build-only run (artifacts, no release)
+      - name: Determine release tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ github.event.inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+            echo "publish=${{ github.event.inputs.publish || 'true' }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "push" ] && [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Prepare Release APK Artifacts
         run: |
           mkdir -p release_assets
-          TAG="${{ github.ref_name || github.event.inputs.tag_name || 'release2.0-stable' }}"
-          cp app/build/outputs/apk/release/app-release.apk release_assets/VCodec-${TAG}.apk
-          cp app/build/outputs/apk/debug/app-debug.apk release_assets/VCodec-${TAG}-debug.apk
+          TAG="${{ steps.tag.outputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="manual-${GITHUB_SHA::7}"; fi
+          cp app/build/outputs/apk/release/app-release.apk "release_assets/VCodec-${TAG}.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "release_assets/VCodec-${TAG}-debug.apk"
+          ls -la release_assets
+
+      - name: Upload APK artifacts (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: VCodec-APKs
+          path: release_assets/*.apk
+          if-no-files-found: error
 
       - name: Create GitHub Release & Upload APK
+        if: ${{ steps.tag.outputs.tag != '' && steps.tag.outputs.publish == 'true' }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name || github.event.inputs.tag_name }}
-          name: "VCodec ${{ github.ref_name || github.event.inputs.tag_name }}"
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "VCodec ${{ steps.tag.outputs.tag }}"
           draft: false
           prerelease: false
           generate_release_notes: true

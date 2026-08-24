@@ -28,6 +28,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         /** "Large video" threshold: files above this size are targeted by the large-file mode. */
         const val LARGE_FILE_THRESHOLD_BYTES: Long = 100L * 1024 * 1024
 
+        /** Emit scanned-list updates to the UI in batches to avoid O(n^2) recomposition storms. */
+        private const val SCAN_EMIT_BATCH_SIZE = 20
+
         fun passesSizeFilter(sizeBytes: Long, onlyLargeFiles: Boolean): Boolean =
             !onlyLargeFiles || sizeBytes > LARGE_FILE_THRESHOLD_BYTES
     }
@@ -114,6 +117,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 } catch (e: Exception) {
                     Log.e(TAG, "Error scanning folder: ${e.message}", e)
                 }
+                // Final emission: guarantees the UI shows the complete result
+                _scannedFiles.value = list.toList()
             }
             _isScanning.value = false
         }
@@ -197,8 +202,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                     isSelected = false
                                 )
                                 list.add(scannedFile)
-                                // Stream scanned files incrementally to the UI
-                                _scannedFiles.value = list.toList()
+                                // Stream scanned files to the UI in batches (avoids O(n^2) updates)
+                                if (list.size % SCAN_EMIT_BATCH_SIZE == 0) {
+                                    _scannedFiles.value = list.toList()
+                                }
                             }
                         }
                     }
@@ -274,7 +281,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     sourceUri = file.uri.toString(),
                     sourcePath = file.path,
                     destUri = targetFolder,
-                    destPath = null,
                     fileName = file.name,
                     originalSize = file.size,
                     status = TaskStatus.PENDING,
@@ -784,7 +790,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _downloadProgress.value = 0.0f
             _updateError.value = null
 
-            val downloadedFile = com.vcodec.smartencoder.ota.OtaUpdater.downloadApk(context, downloadUrl) { progress ->
+            val downloadedFile = com.vcodec.smartencoder.ota.OtaUpdater.downloadApk(
+                context,
+                downloadUrl,
+                expectedSha256 = info.expectedSha256,
+                expectedSizeBytes = info.expectedSizeBytes
+            ) { progress ->
                 _downloadProgress.value = progress
             }
 
@@ -794,7 +805,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 com.vcodec.smartencoder.ota.OtaUpdater.installApk(context, downloadedFile)
                 _showUpdateDialog.value = false
             } else {
-                _updateError.value = "Failed to download update APK"
+                _updateError.value = "Failed to download update APK (integrity verification may have failed)"
             }
         }
     }

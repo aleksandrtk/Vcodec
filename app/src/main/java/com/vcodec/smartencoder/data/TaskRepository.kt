@@ -66,6 +66,12 @@ class TaskRepository(private val context: Context) {
         }
         val transcodeRequest = OneTimeWorkRequestBuilder<VideoTranscodeWorker>()
             .setInputData(dataBuilder.build())
+            // Exponential backoff for transient failures (Result.retry from the worker)
+            .setBackoffCriteria(
+                androidx.work.BackoffPolicy.EXPONENTIAL,
+                androidx.work.WorkRequest.MIN_BACKOFF_MILLIS,
+                java.util.concurrent.TimeUnit.MILLISECONDS
+            )
             .build()
         // Run queue sequentially using unique work strategy
         workManager.enqueueUniqueWork(

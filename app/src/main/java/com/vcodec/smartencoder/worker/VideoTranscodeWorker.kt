@@ -5,7 +5,6 @@ import android.net.Uri
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
-import androidx.documentfile.provider.DocumentFile
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
@@ -131,7 +130,8 @@ class VideoTranscodeWorker(
                             break
                         }
                         val currentTemp = ThermalMonitor.getCpuTemperature()
-                        taskDao.updateTask(task.copy(cpuTemp = currentTemp))
+                        // Targeted column update: never clobbers concurrent progress writes
+                        taskDao.updateCpuTemp(taskId, currentTemp)
                         delay(1000)
                     }
                 } catch (_: kotlinx.coroutines.CancellationException) {
@@ -192,10 +192,8 @@ class VideoTranscodeWorker(
                             listener = object : VideoTranscoder.ProgressListener {
                                 override fun onProgress(progress: Float) {
                                     launch {
-                                        val task = taskDao.getTaskById(taskId)
-                                        if (task != null) {
-                                            taskDao.updateTask(task.copy(progress = progress))
-                                        }
+                                        // Targeted column update: never clobbers concurrent cpuTemp writes
+                                        taskDao.updateProgress(taskId, progress)
                                         setForeground(TranscodeNotificationController.createForegroundInfo(context, progress, "Compressing ${currentTask?.fileName ?: ""}"))
                                     }
                                 }
@@ -244,10 +242,7 @@ class VideoTranscodeWorker(
                                 listener = object : VideoTranscoder.ProgressListener {
                                     override fun onProgress(progress: Float) {
                                         launch {
-                                            val task = taskDao.getTaskById(taskId)
-                                            if (task != null) {
-                                                taskDao.updateTask(task.copy(progress = progress))
-                                            }
+                                            taskDao.updateProgress(taskId, progress)
                                             setForeground(TranscodeNotificationController.createForegroundInfo(context, progress, "Compressing (SDR Fallback) ${currentTask?.fileName ?: ""}"))
                                         }
                                     }
@@ -290,18 +285,17 @@ class VideoTranscodeWorker(
                         if (originalDates != null) {
                             MetadataRestorer.restoreMediaStoreDates(context, finalUri, originalDates)
                         }
-                            // Final chronology assertion: guarantee DATE_TAKEN/DATE_ADDED/DATE_MODIFIED
-                            // in MediaStore so the file stays at its original timeline position.
-                            if (originalDates != null) {
-                                MetadataRestorer.restoreMediaStoreDates(context, finalUri, originalDates)
-                            }
                             compressedSize = MediaStorageManager.getUriSize(context, finalUri)
                         } else {
                             throw java.io.IOException("Failed to obtain output URI for keep-original mode")
                         }
                     } else {
-                        // Two-Phase Transactional Replace:
-                        // Step 1: Verify transcoded tempFile integrity BEFORE deleting anything
+                        // Two-Phase Transactional Replace.
+                        // Order matters for data safety: a new pending MediaStore entry is created
+                        // and fully verified BEFORE the original file is deleted, so any failure
+                        // leaves the original untouched.
+                        
+                        // Step 1: Verify transcoded tempFile integrity BEFORE touching anything
                         if (!tempFile.exists() || tempFile.length() <= 0L) {
                             throw java.io.IOException("Transcoded temporary file is missing or empty, aborting replace to prevent data loss")
                         }
@@ -321,46 +315,18 @@ class VideoTranscodeWorker(
                             throw java.io.IOException("Temp file corrupted after metadata restoration, aborting replace")
                         }
 
-                        // Step 3: Delete the original source file
-                        var deleteSuccess = false
-                        try {
-                            deleteSuccess = android.provider.DocumentsContract.deleteDocument(context.contentResolver, sourceUri)
-                        } catch (e: Exception) {
-                            try {
-                                val rows = context.contentResolver.delete(sourceUri, null, null)
-                                deleteSuccess = rows > 0
-                            } catch (e2: Exception) {
-                                Log.e(TAG, "Failed to delete original file: ${e2.message}")
-                            }
-                        }
-
-                        // Step 4: Create a new MediaStore entry with exact original name if delete succeeded, or fallback if needed
-                        val resolvedUri = MediaStorageManager.createOutputUri(
+                        // Step 3: Create a new PENDING MediaStore entry first (original still intact).
+                        val targetOutputUri = MediaStorageManager.createOutputUri(
                             context = context,
                             sourceUri = sourceUri,
                             keepOriginal = true,
                             fileName = currentTask.fileName,
                             originalDates = originalDates,
-                            exactName = deleteSuccess,
+                            exactName = false,
                             sourcePath = currentTask.sourcePath
-                        )
+                        ) ?: throw java.io.IOException("Failed to create MediaStore entry")
 
-                        val targetOutputUri: Uri = if (resolvedUri != null) {
-                            resolvedUri
-                        } else {
-                            Log.w(TAG, "Failed to create exact name URI. Falling back to recovery output URI...")
-                            MediaStorageManager.createOutputUri(
-                                context = context,
-                                sourceUri = sourceUri,
-                                keepOriginal = true,
-                                fileName = currentTask.fileName,
-                                originalDates = originalDates,
-                                exactName = false,
-                                sourcePath = currentTask.sourcePath
-                            ) ?: throw java.io.IOException("Failed to create recovery MediaStore entry")
-                        }
-
-                        // Step 5: Copy verified tempFile to target MediaStore URI
+                        // Step 4: Copy verified tempFile to the pending MediaStore URI
                         try {
                             context.contentResolver.openOutputStream(targetOutputUri)?.use { outputStream ->
                                 FileInputStream(tempFile).use { inputStream ->
@@ -378,35 +344,73 @@ class VideoTranscodeWorker(
                                 originalDates = originalDates,
                                 exactName = false,
                                 sourcePath = currentTask.sourcePath
-                            ) ?: throw java.io.IOException("Recovery fallback creation failed", e)
-
-                            context.contentResolver.openOutputStream(recoveryUri)?.use { outputStream ->
-                                FileInputStream(tempFile).use { inputStream ->
-                                    inputStream.copyTo(outputStream)
+                            )
+                            if (recoveryUri != null) {
+                                try {
+                                    context.contentResolver.openOutputStream(recoveryUri)?.use { outputStream ->
+                                        FileInputStream(tempFile).use { inputStream ->
+                                            inputStream.copyTo(outputStream)
+                                        }
+                                    } ?: throw java.io.IOException("Recovery fallback open stream failed", e)
+                                    finalUri = recoveryUri
+                                } catch (copyError: Exception) {
+                                    try { context.contentResolver.delete(recoveryUri, null, null) } catch (_: Exception) {}
+                                    try { context.contentResolver.delete(targetOutputUri, null, null) } catch (_: Exception) {}
+                                    throw copyError
                                 }
-                            } ?: throw java.io.IOException("Recovery fallback open stream failed", e)
-
-                            finalUri = recoveryUri
+                            } else {
+                                try { context.contentResolver.delete(targetOutputUri, null, null) } catch (_: Exception) {}
+                                throw java.io.IOException("Recovery fallback creation failed", e)
+                            }
                         }
 
-                        // Step 6: Restore physical dates & finalize pending entry
+                        // Step 5: Verify the copied data matches the temp file byte-for-byte size
+                        val writtenUri = finalUri ?: throw java.io.IOException("Target output URI is null after copy")
+                        val copiedSize = MediaStorageManager.getUriSize(context, writtenUri)
+                        if (copiedSize <= 0L || copiedSize != tempFile.length()) {
+                            try { context.contentResolver.delete(writtenUri, null, null) } catch (_: Exception) {}
+                            throw java.io.IOException(
+                                "Copied file verification failed (expected ${tempFile.length()} bytes, got $copiedSize). Original kept intact."
+                            )
+                        }
+
+                        // Step 6: Only NOW delete the original source file
+                        var deleteSuccess = false
+                        try {
+                            deleteSuccess = android.provider.DocumentsContract.deleteDocument(context.contentResolver, sourceUri)
+                        } catch (e: Exception) {
+                            try {
+                                val rows = context.contentResolver.delete(sourceUri, null, null)
+                                deleteSuccess = rows > 0
+                            } catch (e2: Exception) {
+                                Log.e(TAG, "Failed to delete original file: ${e2.message}")
+                            }
+                        }
+
+                        // Step 7: Claim the exact original filename once the original is gone
+                        if (deleteSuccess && !currentTask.fileName.equals(MediaStorageManager.getDisplayName(context, writtenUri), ignoreCase = true)) {
+                            try {
+                                val renameValues = android.content.ContentValues().apply {
+                                    put(android.provider.MediaStore.Video.Media.DISPLAY_NAME, currentTask.fileName)
+                                }
+                                context.contentResolver.update(writtenUri, renameValues, null, null)
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Could not rename compressed file to exact original name: ${e.message}")
+                            }
+                        }
+
+                        // Step 8: Restore physical dates & finalize pending entry
                         MetadataRestorer.restoreAllMetadata(
                             context = context,
                             sourceUri = android.net.Uri.fromFile(tempFile),
-                            destUri = finalUri,
+                            destUri = writtenUri,
                             sourcePath = tempFile.absolutePath,
-                            destPath = finalUri.path,
+                            destPath = writtenUri.path,
                             originalDates = originalDates
                         )
-                        MediaStorageManager.finalizePendingUri(context, finalUri, originalDates)
+                        MediaStorageManager.finalizePendingUri(context, writtenUri, originalDates)
 
-                        compressedSize = try {
-                            val doc = androidx.documentfile.provider.DocumentFile.fromSingleUri(context, finalUri)
-                            val length = doc?.length() ?: 0L
-                            if (length > 0L) length else tempFile.length()
-                        } catch (_: Exception) {
-                            tempFile.length()
-                        }
+                        compressedSize = copiedSize
                     }
 
                     val targetFileUri = finalUri ?: throw java.io.IOException("Target output URI is null after completion")

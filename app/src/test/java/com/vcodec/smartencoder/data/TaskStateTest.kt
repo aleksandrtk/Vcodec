@@ -13,7 +13,6 @@ class TaskStateTest {
             sourceUri = "content://media/external/video/media/100",
             sourcePath = "DCIM/Camera/",
             destUri = null,
-            destPath = null,
             fileName = "VID_2026.mp4",
             originalSize = 100_000_000L
         )
@@ -31,7 +30,6 @@ class TaskStateTest {
             sourceUri = "content://media/external/video/media/100",
             sourcePath = "DCIM/Camera/",
             destUri = null,
-            destPath = null,
             fileName = "VID_2026.mp4",
             originalSize = 100_000_000L
         )
@@ -56,7 +54,6 @@ class TaskStateTest {
             sourceUri = "content://media/external/video/media/100",
             sourcePath = "DCIM/Camera/",
             destUri = null,
-            destPath = null,
             fileName = "VID_2026.mp4",
             originalSize = 100_000_000L,
             status = TaskStatus.PROCESSING
@@ -82,7 +79,6 @@ class TaskStateTest {
             sourceUri = "content://media/external/video/media/100",
             sourcePath = "DCIM/Camera/",
             destUri = null,
-            destPath = null,
             fileName = "VID_2026.mp4",
             originalSize = 100_000_000L,
             status = TaskStatus.PROCESSING

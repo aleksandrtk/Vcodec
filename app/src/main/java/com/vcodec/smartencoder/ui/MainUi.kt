@@ -206,9 +206,21 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
 
     val writePermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
-    ) { _ ->
-        viewModel.addSelectedToQueue()
-        onNavigateToQueue()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            viewModel.addSelectedToQueue()
+            onNavigateToQueue()
+        } else {
+            // User denied the write request: Replace mode cannot modify originals.
+            android.widget.Toast.makeText(
+                context,
+                "Write permission denied. Files will be saved as copies instead.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+            viewModel.setKeepOriginal(true)
+            viewModel.addSelectedToQueue()
+            onNavigateToQueue()
+        }
     }
 
     Column(

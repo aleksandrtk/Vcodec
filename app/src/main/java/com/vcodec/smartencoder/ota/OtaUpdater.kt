@@ -15,11 +15,21 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 
 object OtaUpdater {
     private const val TAG = "OtaUpdater"
     const val REPO_OWNER = "aleksandrtk"
     const val REPO_NAME = "Vcodec"
+
+    /** Hosts the APK download may be redirected to (GitHub Releases CDN). */
+    private val ALLOWED_REDIRECT_HOSTS = listOf(
+        "github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+        "raw.githubusercontent.com",
+        "codeload.github.com"
+    )
 
     data class UpdateInfo(
         val hasUpdate: Boolean,
@@ -28,8 +38,43 @@ object OtaUpdater {
         val releaseName: String,
         val changelog: String,
         val downloadUrl: String?,
-        val releaseHtmlUrl: String?
+        val releaseHtmlUrl: String?,
+        val expectedSha256: String? = null,
+        val expectedSizeBytes: Long = 0L
     )
+
+    /** Parses GitHub asset digest format ("sha256:abcdef...") into bare hex, or null. */
+    fun parseDigest(digest: String?): String? {
+        if (digest.isNullOrBlank()) return null
+        val hex = digest.trim().substringAfter(":", "").lowercase()
+        return if (hex.length == 64 && hex.all { it.isDigit() || it in 'a'..'f' }) hex else null
+    }
+
+    fun isValidDownloadUrl(urlString: String): Boolean {
+        return try {
+            val url = URL(urlString)
+            url.protocol.equals("https", ignoreCase = true) &&
+                ALLOWED_REDIRECT_HOSTS.any { url.host.equals(it, ignoreCase = true) }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun computeSha256(file: File): String? {
+        return try {
+            val md = MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                var read: Int
+                while (input.read(buffer).also { read = it } != -1) {
+                    md.update(buffer, 0, read)
+                }
+            }
+            md.digest().joinToString("") { "%02x".format(it) }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     /**
      * Normalizes version strings by removing common prefixes/suffixes (v, release, -stable)
@@ -97,6 +142,8 @@ object OtaUpdater {
                 val releaseHtmlUrl = releaseJson.optString("html_url", "https://github.com/$REPO_OWNER/$REPO_NAME/releases")
 
                 var downloadUrl: String? = null
+                var expectedSha256: String? = null
+                var expectedSizeBytes = 0L
                 val assets = releaseJson.optJSONArray("assets")
                 if (assets != null) {
                     for (i in 0 until assets.length()) {
@@ -104,6 +151,8 @@ object OtaUpdater {
                         val name = asset.optString("name", "")
                         if (name.endsWith(".apk", ignoreCase = true)) {
                             downloadUrl = asset.optString("browser_download_url")
+                            expectedSha256 = parseDigest(asset.optString("digest", ""))
+                            expectedSizeBytes = asset.optLong("size", 0L)
                             break
                         }
                     }
@@ -120,7 +169,9 @@ object OtaUpdater {
                     releaseName = releaseName,
                     changelog = changelog,
                     downloadUrl = downloadUrl,
-                    releaseHtmlUrl = releaseHtmlUrl
+                    releaseHtmlUrl = releaseHtmlUrl,
+                    expectedSha256 = expectedSha256,
+                    expectedSizeBytes = expectedSizeBytes
                 )
             }
         } catch (e: Exception) {
@@ -184,12 +235,23 @@ object OtaUpdater {
 
     /**
      * Downloads the APK file following HTTP redirects (e.g. GitHub release CDN redirects).
+     * Security:
+     *  - Only HTTPS URLs on known GitHub hosts are accepted (initial URL and every redirect hop).
+     *  - The downloaded file is verified against the expected size and SHA-256 digest
+     *    published with the GitHub Release asset (when available).
      */
     suspend fun downloadApk(
         context: Context,
         downloadUrl: String,
-        onProgress: (Float) -> Unit
+        onProgress: (Float) -> Unit,
+        expectedSha256: String? = null,
+        expectedSizeBytes: Long = 0L
     ): File? = withContext(Dispatchers.IO) {
+        if (!isValidDownloadUrl(downloadUrl)) {
+            Log.e(TAG, "Refusing to download APK from untrusted URL: $downloadUrl")
+            return@withContext null
+        }
+
         var currentUrl = downloadUrl
         val maxRedirects = 5
 
@@ -208,10 +270,13 @@ object OtaUpdater {
                     responseCode == HttpURLConnection.HTTP_SEE_OTHER ||
                     responseCode == 307 || responseCode == 308) {
                     val location = connection.getHeaderField("Location")
-                    if (!location.isNullOrEmpty()) {
-                        currentUrl = location
-                        continue
+                    if (location.isNullOrEmpty()) break
+                    if (!isValidDownloadUrl(location)) {
+                        Log.e(TAG, "Blocked redirect to untrusted host: $location")
+                        break
                     }
+                    currentUrl = location
+                    continue
                 }
 
                 if (responseCode == HttpURLConnection.HTTP_OK) {
@@ -235,10 +300,35 @@ object OtaUpdater {
                         }
                     }
 
-                    if (cacheFile.exists() && cacheFile.length() > 0L) {
-                        Log.i(TAG, "APK update downloaded successfully: ${cacheFile.length()} bytes")
-                        return@withContext cacheFile
+                    val actualLength = if (cacheFile.exists()) cacheFile.length() else 0L
+                    if (actualLength <= 0L) {
+                        Log.e(TAG, "Downloaded APK is empty")
+                        break
                     }
+
+                    // Integrity check #1: expected size from the release asset metadata
+                    val expectedLen = if (expectedSizeBytes > 0L) expectedSizeBytes else fileLength
+                    if (expectedLen > 0L && actualLength != expectedLen) {
+                        Log.e(TAG, "APK size mismatch: expected $expectedLen bytes, got $actualLength. Aborting.")
+                        cacheFile.delete()
+                        break
+                    }
+
+                    // Integrity check #2: SHA-256 digest published with the release asset
+                    if (expectedSha256 != null) {
+                        val actualSha256 = computeSha256(cacheFile)
+                        if (actualSha256 == null || !actualSha256.equals(expectedSha256, ignoreCase = true)) {
+                            Log.e(TAG, "APK SHA-256 mismatch: expected $expectedSha256, got $actualSha256. Aborting.")
+                            cacheFile.delete()
+                            break
+                        }
+                        Log.i(TAG, "APK SHA-256 verified OK (${actualSha256.take(12)}...)")
+                    } else {
+                        Log.w(TAG, "Release asset has no sha256 digest; only size check was possible.")
+                    }
+
+                    Log.i(TAG, "APK update downloaded successfully: $actualLength bytes")
+                    return@withContext cacheFile
                 } else {
                     Log.e(TAG, "Download failed with HTTP status: $responseCode")
                 }
@@ -246,6 +336,7 @@ object OtaUpdater {
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception downloading APK: ${e.message}", e)
+            try { File(context.cacheDir, "smart_encoder_update.apk").delete() } catch (_: Exception) {}
         }
         return@withContext null
     }
