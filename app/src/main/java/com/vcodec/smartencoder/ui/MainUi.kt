@@ -24,6 +24,10 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -52,6 +56,7 @@ import java.util.Locale
 fun SmartEncoderAppContent(viewModel: MainViewModel) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Scanner", "Queue", "Savings & History")
+    val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
 
     Scaffold(
         topBar = {
@@ -63,6 +68,26 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
                         color = TextWhite,
                         letterSpacing = 0.5.sp
                     )
+                },
+                actions = {
+                    val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsState()
+                    IconButton(
+                        onClick = { viewModel.checkForUpdates("1.0.0", manual = true) }
+                    ) {
+                        if (isCheckingUpdate) {
+                            CircularProgressIndicator(
+                                color = PrimaryCyan,
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Default.SystemUpdate,
+                                contentDescription = "Check for Updates",
+                                tint = PrimaryCyan
+                            )
+                        }
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = Color(0x7F0F172A) // Glassy dark
@@ -119,6 +144,10 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
                 0 -> ScannerScreen(viewModel, onNavigateToQueue = { selectedTab = 1 })
                 1 -> QueueScreen(viewModel)
                 2 -> HistoryScreen(viewModel)
+            }
+
+            if (showUpdateDialog) {
+                UpdateDialog(viewModel = viewModel)
             }
         }
     }
@@ -1106,7 +1135,68 @@ fun HistoryScreen(viewModel: MainViewModel) {
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // App Version & In-App OTA Update card
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0x331E293B)),
+            border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.25f))
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text(
+                        "VCodec Smart Encoder",
+                        color = TextWhite,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        "Installed: v1.0.0",
+                        color = TextGray,
+                        fontSize = 12.sp
+                    )
+                }
+
+                val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsState()
+                OutlinedButton(
+                    onClick = { viewModel.checkForUpdates("1.0.0", manual = true) },
+                    enabled = !isCheckingUpdate,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryCyan),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.5f)),
+                    shape = RoundedCornerShape(8.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    if (isCheckingUpdate) {
+                        CircularProgressIndicator(
+                            color = PrimaryCyan,
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Checking...", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.CloudDownload,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Check Updates", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
 
         var isFixingDates by remember { mutableStateOf(false) }
 
@@ -1287,3 +1377,188 @@ fun openVideoInGallery(context: android.content.Context, uriString: String?) {
 
 // Utility extension function to format doubles to strings with specific decimal length
 fun Double.format(digits: Int) = String.format(Locale.getDefault(), "%.${digits}f", this)
+
+@Composable
+fun UpdateDialog(viewModel: MainViewModel) {
+    val context = LocalContext.current
+    val isChecking by viewModel.isCheckingUpdate.collectAsState()
+    val updateInfo by viewModel.updateInfo.collectAsState()
+    val isDownloading by viewModel.isDownloadingUpdate.collectAsState()
+    val downloadProgress by viewModel.downloadProgress.collectAsState()
+    val updateError by viewModel.updateError.collectAsState()
+
+    AlertDialog(
+        onDismissRequest = {
+            if (!isDownloading) viewModel.dismissUpdateDialog()
+        },
+        containerColor = Color(0xFF0F172A),
+        shape = RoundedCornerShape(20.dp),
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.SystemUpdate,
+                        contentDescription = "Update",
+                        tint = PrimaryCyan,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        if (updateInfo?.hasUpdate == true) "Update Available" else if (isChecking) "Checking Updates..." else "App Up to Date",
+                        color = TextWhite,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp
+                    )
+                }
+                if (!isDownloading) {
+                    IconButton(onClick = { viewModel.dismissUpdateDialog() }) {
+                        Icon(Icons.Default.Close, contentDescription = "Close", tint = TextGray)
+                    }
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (isChecking) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 24.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(color = PrimaryCyan)
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Text("Checking GitHub for releases...", color = TextGray, fontSize = 14.sp)
+                    }
+                } else if (updateError != null) {
+                    Text(
+                        "Could not check for updates:\n$updateError",
+                        color = AlertRed,
+                        fontSize = 14.sp
+                    )
+                } else if (updateInfo?.hasUpdate == true) {
+                    val info = updateInfo!!
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    ) {
+                        Text("Installed: v1.0.0", color = TextGray, fontSize = 13.sp)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(PrimaryCyan.copy(alpha = 0.2f))
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text(
+                                "Latest: ${info.rawTagName}",
+                                color = PrimaryCyan,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
+
+                    if (info.releaseName.isNotEmpty() && info.releaseName != info.rawTagName) {
+                        Text(
+                            info.releaseName,
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            modifier = Modifier.padding(bottom = 6.dp)
+                        )
+                    }
+
+                    Text("What's New:", color = TextWhite, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 160.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x331E293B))
+                            .padding(10.dp)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        Text(
+                            info.changelog.ifEmpty { "Performance improvements and bug fixes." },
+                            color = TextGray,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp
+                        )
+                    }
+
+                    if (isDownloading) {
+                        Spacer(modifier = Modifier.height(16.dp))
+                        LinearProgressIndicator(
+                            progress = { downloadProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = PrimaryCyan,
+                            trackColor = Color(0xFF334155)
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            String.format(Locale.getDefault(), "Downloading update: %.0f%%", downloadProgress * 100),
+                            color = PrimaryCyan,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                } else {
+                    Text(
+                        "You are running the latest version of VCodec (v1.0.0). No new updates found on GitHub.",
+                        color = TextGray,
+                        fontSize = 14.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (updateInfo?.hasUpdate == true && !isChecking) {
+                Button(
+                    onClick = { viewModel.startDownloadAndInstall(context) },
+                    enabled = !isDownloading,
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryCyan, contentColor = Color.Black),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    if (isDownloading) {
+                        CircularProgressIndicator(
+                            color = Color.Black,
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Downloading...", color = Color.Black, fontWeight = FontWeight.Bold)
+                    } else if (updateInfo?.downloadUrl != null) {
+                        Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Download & Install", fontWeight = FontWeight.Bold)
+                    } else {
+                        Icon(Icons.Default.OpenInBrowser, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Open Release Page", fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else if (!isChecking) {
+                TextButton(onClick = { viewModel.dismissUpdateDialog() }) {
+                    Text("OK", color = PrimaryCyan, fontWeight = FontWeight.Bold)
+                }
+            }
+        },
+        dismissButton = {
+            if (updateInfo?.hasUpdate == true && !isDownloading) {
+                TextButton(onClick = { viewModel.dismissUpdateDialog() }) {
+                    Text("Later", color = TextGray)
+                }
+            }
+        }
+    )
+}

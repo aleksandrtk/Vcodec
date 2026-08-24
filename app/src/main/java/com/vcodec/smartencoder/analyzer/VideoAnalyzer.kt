@@ -179,6 +179,61 @@ object VideoAnalyzer {
         return maxOf(targetBitrate, 800_000)
     }
 
+    /**
+     * Calculates logical and target output dimensions accounting for rotation and aspect ratio.
+     * Dimensions are guaranteed to be even integers for codec compliance.
+     */
+    fun calculateTargetDimensions(
+        origWidth: Int,
+        origHeight: Int,
+        rotation: Int,
+        targetResStr: String
+    ): Pair<Int, Int> {
+        val isRotated = rotation == 90 || rotation == 270
+        val logicalOrigWidth = if (isRotated) origHeight else origWidth
+        val logicalOrigHeight = if (isRotated) origWidth else origHeight
+
+        if (logicalOrigWidth <= 0 || logicalOrigHeight <= 0) {
+            return Pair(0, 0)
+        }
+
+        val maxDimension = when (targetResStr) {
+            "1080p" -> 1920
+            "720p" -> 1280
+            else -> 0
+        }
+
+        var targetWidth: Int
+        var targetHeight: Int
+
+        if (maxDimension > 0) {
+            if (logicalOrigWidth >= logicalOrigHeight) {
+                if (logicalOrigWidth > maxDimension) {
+                    targetWidth = maxDimension
+                    targetHeight = (logicalOrigHeight * maxDimension.toDouble() / logicalOrigWidth).toInt()
+                } else {
+                    targetWidth = logicalOrigWidth
+                    targetHeight = logicalOrigHeight
+                }
+            } else {
+                if (logicalOrigHeight > maxDimension) {
+                    targetHeight = maxDimension
+                    targetWidth = (logicalOrigWidth * maxDimension.toDouble() / logicalOrigHeight).toInt()
+                } else {
+                    targetWidth = logicalOrigWidth
+                    targetHeight = logicalOrigHeight
+                }
+            }
+            targetWidth = (targetWidth / 2) * 2
+            targetHeight = (targetHeight / 2) * 2
+        } else {
+            targetWidth = (logicalOrigWidth / 2) * 2
+            targetHeight = (logicalOrigHeight / 2) * 2
+        }
+
+        return Pair(targetWidth, targetHeight)
+    }
+
     private fun MediaFormat.getSafeInteger(key: String, defaultValue: Int): Int {
         return try {
             if (containsKey(key)) getInteger(key) else defaultValue
