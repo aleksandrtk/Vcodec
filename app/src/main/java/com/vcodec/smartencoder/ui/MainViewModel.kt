@@ -550,6 +550,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // --- Theme state (persisted) ---
+    private val prefs = application.getSharedPreferences("ui_prefs", Context.MODE_PRIVATE)
+
+    private val _isDarkTheme = MutableStateFlow(prefs.getBoolean("dark_theme", true))
+    val isDarkTheme: StateFlow<Boolean> = _isDarkTheme.asStateFlow()
+
+    fun toggleTheme() {
+        val next = !_isDarkTheme.value
+        _isDarkTheme.value = next
+        prefs.edit().putBoolean("dark_theme", next).apply()
+    }
+
     fun pauseTask(taskId: Long) = viewModelScope.launch { repository.pauseTask(taskId) }
     fun resumeTask(taskId: Long) = viewModelScope.launch { repository.resumeTask(taskId) }
 

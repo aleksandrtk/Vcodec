@@ -7,6 +7,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.vcodec.smartencoder.ui.MainViewModel
@@ -24,7 +26,8 @@ class MainActivity : ComponentActivity() {
         checkAndRequestPermissions()
 
         setContent {
-            SmartEncoderTheme {
+            val isDark = viewModel.isDarkTheme.collectAsState(initial = true).value
+            SmartEncoderTheme(darkTheme = isDark) {
                 SmartEncoderAppContent(viewModel = viewModel)
             }
         }

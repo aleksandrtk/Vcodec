@@ -27,6 +27,8 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.OpenInBrowser
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
@@ -44,10 +46,13 @@ import androidx.compose.ui.unit.sp
 import com.vcodec.smartencoder.BuildConfig
 import com.vcodec.smartencoder.data.TaskStatus
 import com.vcodec.smartencoder.data.TranscodeTask
+import com.vcodec.smartencoder.ui.theme.AccentEmerald
 import com.vcodec.smartencoder.ui.theme.AlertAmber
 import com.vcodec.smartencoder.ui.theme.AlertRed
 import com.vcodec.smartencoder.ui.theme.DarkSurface
+import com.vcodec.smartencoder.ui.theme.LocalAppColors
 import com.vcodec.smartencoder.ui.theme.PrimaryCyan
+import com.vcodec.smartencoder.ui.theme.SuccessColor
 import com.vcodec.smartencoder.ui.theme.TextGray
 import com.vcodec.smartencoder.ui.theme.TextWhite
 import java.util.Locale
@@ -58,6 +63,7 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Scanner", "Queue", "Savings & History")
     val showUpdateDialog by viewModel.showUpdateDialog.collectAsState()
+    val isDarkTheme by viewModel.isDarkTheme.collectAsState()
 
     Scaffold(
         topBar = {
@@ -72,6 +78,15 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
                 },
                 actions = {
                     val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsState()
+                    IconButton(
+                        onClick = { viewModel.toggleTheme() }
+                    ) {
+                        Icon(
+                            imageVector = if (isDarkTheme) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            contentDescription = "Toggle theme",
+                            tint = PrimaryCyan
+                        )
+                    }
                     IconButton(
                         onClick = { viewModel.checkForUpdates(BuildConfig.VERSION_NAME, manual = true) }
                     ) {
@@ -91,13 +106,13 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color(0x7F0F172A) // Glassy dark
+                    containerColor = LocalAppColors.current.appBarGlass
                 )
             )
         },
         bottomBar = {
             NavigationBar(
-                containerColor = Color(0xCC0F172A), // Glassy dark
+                containerColor = LocalAppColors.current.navGlass,
                 tonalElevation = 8.dp
             ) {
                 tabs.forEachIndexed { index, title ->
@@ -116,7 +131,7 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
                         },
                         label = { Text(title, fontWeight = FontWeight.Bold, fontSize = 11.sp) },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.Black,
+                            selectedIconColor = LocalAppColors.current.onAccent,
                             selectedTextColor = PrimaryCyan,
                             indicatorColor = PrimaryCyan,
                             unselectedIconColor = TextGray,
@@ -133,9 +148,9 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF070A13), // Deep cosmic black-blue
-                            Color(0xFF0F172A), // Deep slate navy
-                            Color(0xFF1E1E38)  // Subtle indigo bottom glow
+                            LocalAppColors.current.backgroundTop,
+                            LocalAppColors.current.backgroundMid,
+                            LocalAppColors.current.backgroundBottom
                         )
                     )
                 )
@@ -180,7 +195,7 @@ fun InfoDot(infoText: String) {
                 Card(
                     modifier = Modifier.padding(8.dp).widthIn(max = 280.dp),
                     shape = RoundedCornerShape(10.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurface),
                     border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.35f))
                 ) {
                     Text(
@@ -404,7 +419,7 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                     Card(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = Color(0x3D1E293B)),
+                        colors = CardDefaults.cardColors(containerColor = LocalAppColors.current.surfaceTransparent),
                         border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.2f))
                     ) {
                         Row(
@@ -436,198 +451,6 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                                     modifier = Modifier.background(PrimaryCyan.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = "Change Folder", tint = PrimaryCyan)
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Item 2: Header and sorting
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            if (onlyLargeFiles) "${scannedFiles.size} large videos (> 100 MB)"
-                            else "${scannedFiles.size} videos found",
-                            color = TextWhite,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                        Box {
-                            Row(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(DarkSurface)
-                                    .clickable { sortMenuExpanded = true }
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = when (sortOrder) {
-                                        MainViewModel.SortOrder.NAME_ASC -> "Name (A-Z)"
-                                        MainViewModel.SortOrder.NAME_DESC -> "Name (Z-A)"
-                                        MainViewModel.SortOrder.SIZE_ASC -> "Size (Asc)"
-                                        MainViewModel.SortOrder.SIZE_DESC -> "Size (Desc)"
-                                        MainViewModel.SortOrder.DATE_ASC -> "Date (Oldest)"
-                                        MainViewModel.SortOrder.DATE_DESC -> "Date (Newest)"
-                                    },
-                                    color = PrimaryCyan,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.SemiBold
-                                )
-                            }
-                            DropdownMenu(
-                                expanded = sortMenuExpanded,
-                                onDismissRequest = { sortMenuExpanded = false },
-                                modifier = Modifier.background(DarkSurface)
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("Name (A-Z)", color = TextWhite) },
-                                    onClick = {
-                                        viewModel.setSortOrder(MainViewModel.SortOrder.NAME_ASC)
-                                        sortMenuExpanded = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Name (Z-A)", color = TextWhite) },
-                                    onClick = {
-                                        viewModel.setSortOrder(MainViewModel.SortOrder.NAME_DESC)
-                                        sortMenuExpanded = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Size (Smallest first)", color = TextWhite) },
-                                    onClick = {
-                                        viewModel.setSortOrder(MainViewModel.SortOrder.SIZE_ASC)
-                                        sortMenuExpanded = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Size (Largest first)", color = TextWhite) },
-                                    onClick = {
-                                        viewModel.setSortOrder(MainViewModel.SortOrder.SIZE_DESC)
-                                        sortMenuExpanded = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Date (Oldest first)", color = TextWhite) },
-                                    onClick = {
-                                        viewModel.setSortOrder(MainViewModel.SortOrder.DATE_ASC)
-                                        sortMenuExpanded = false
-                                    }
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Date (Newest first)", color = TextWhite) },
-                                    onClick = {
-                                        viewModel.setSortOrder(MainViewModel.SortOrder.DATE_DESC)
-                                        sortMenuExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Item 3: Large-file filter + Select all / Clear all
-                item {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        FilterChip(
-                            selected = onlyLargeFiles,
-                            onClick = { viewModel.setOnlyLargeFiles(!onlyLargeFiles) },
-                            label = { Text("> 100 MB", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = DarkSurface,
-                                selectedContainerColor = PrimaryCyan.copy(alpha = 0.2f),
-                                selectedLabelColor = PrimaryCyan,
-                                labelColor = TextGray
-                            )
-                        )
-                        Row {
-                            TextButton(onClick = { viewModel.toggleAllFilesSelection(true) }) {
-                                Text("Select All", color = PrimaryCyan)
-                            }
-                            TextButton(onClick = { viewModel.toggleAllFilesSelection(false) }) {
-                                Text("Clear All", color = TextGray)
-                            }
-                        }
-                    }
-                }
-
-                // Items list: checklist of files
-                items(
-                    items = scannedFiles,
-                    key = { it.uri.toString() }
-                ) { file ->
-                    val isSelected = file.isSelected
-                    val borderAlpha by animateFloatAsState(targetValue = if (isSelected) 0.6f else 0.1f)
-                    val bgAlpha by animateFloatAsState(targetValue = if (isSelected) 0.4f else 0.2f)
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0xFF1E293B).copy(alpha = bgAlpha))
-                            .clickable { viewModel.toggleFileSelection(file.uri) }
-                            .padding(12.dp)
-                            .then(
-                                if (isSelected) {
-                                    Modifier.border(
-                                        1.dp,
-                                        PrimaryCyan.copy(alpha = borderAlpha),
-                                        RoundedCornerShape(12.dp)
-                                    )
-                                } else {
-                                    Modifier.border(
-                                        1.dp,
-                                        Color.Gray.copy(alpha = borderAlpha),
-                                        RoundedCornerShape(12.dp)
-                                    )
-                                }
-                            ),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = file.isSelected,
-                            onCheckedChange = { viewModel.toggleFileSelection(file.uri) },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = PrimaryCyan,
-                                uncheckedColor = TextGray.copy(alpha = 0.5f)
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                file.name,
-                                color = TextWhite,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                fontSize = 14.sp
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    Formatter.formatShortFileSize(context, file.size),
-                                    color = TextGray,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                val estimate = if (file.isSelected) sizeEstimates[file.uri.toString()] else null
-                                if (estimate != null && estimate in 1 until file.size) {
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        "→ ~${Formatter.formatShortFileSize(context, estimate)} (−${(100L - estimate * 100 / file.size)}%)",
-                                        color = Color(0xFF4ADE80),
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
                                 }
                             }
                         }
@@ -836,9 +659,202 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                                     checkedThumbColor = Color.Black,
                                     checkedTrackColor = PrimaryCyan,
                                     uncheckedThumbColor = TextGray,
-                                    uncheckedTrackColor = Color(0xFF334155)
+                                    uncheckedTrackColor = LocalAppColors.current.unchecked
                                 )
                             )
+                        }
+                    }
+                }
+
+
+                // Item 2: Header and sorting
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            if (onlyLargeFiles) "${scannedFiles.size} large videos (> 100 MB)"
+                            else "${scannedFiles.size} videos found",
+                            color = TextWhite,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                        Box {
+                            Row(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(DarkSurface)
+                                    .clickable { sortMenuExpanded = true }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = when (sortOrder) {
+                                        MainViewModel.SortOrder.NAME_ASC -> "Name (A-Z)"
+                                        MainViewModel.SortOrder.NAME_DESC -> "Name (Z-A)"
+                                        MainViewModel.SortOrder.SIZE_ASC -> "Size (Asc)"
+                                        MainViewModel.SortOrder.SIZE_DESC -> "Size (Desc)"
+                                        MainViewModel.SortOrder.DATE_ASC -> "Date (Oldest)"
+                                        MainViewModel.SortOrder.DATE_DESC -> "Date (Newest)"
+                                    },
+                                    color = PrimaryCyan,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            DropdownMenu(
+                                expanded = sortMenuExpanded,
+                                onDismissRequest = { sortMenuExpanded = false },
+                                modifier = Modifier.background(DarkSurface)
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("Name (A-Z)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.NAME_ASC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Name (Z-A)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.NAME_DESC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Size (Smallest first)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.SIZE_ASC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Size (Largest first)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.SIZE_DESC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Date (Oldest first)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.DATE_ASC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("Date (Newest first)", color = TextWhite) },
+                                    onClick = {
+                                        viewModel.setSortOrder(MainViewModel.SortOrder.DATE_DESC)
+                                        sortMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Item 3: Large-file filter + Select all / Clear all
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilterChip(
+                            selected = onlyLargeFiles,
+                            onClick = { viewModel.setOnlyLargeFiles(!onlyLargeFiles) },
+                            label = { Text("> 100 MB", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = DarkSurface,
+                                selectedContainerColor = PrimaryCyan.copy(alpha = 0.2f),
+                                selectedLabelColor = PrimaryCyan,
+                                labelColor = TextGray
+                            )
+                        )
+                        Row {
+                            TextButton(onClick = { viewModel.toggleAllFilesSelection(true) }) {
+                                Text("Select All", color = PrimaryCyan)
+                            }
+                            TextButton(onClick = { viewModel.toggleAllFilesSelection(false) }) {
+                                Text("Clear All", color = TextGray)
+                            }
+                        }
+                    }
+                }
+
+                // Items list: checklist of files
+                items(
+                    items = scannedFiles,
+                    key = { it.uri.toString() }
+                ) { file ->
+                    val isSelected = file.isSelected
+                    val borderAlpha by animateFloatAsState(targetValue = if (isSelected) 0.6f else 0.1f)
+                    val bgAlpha by animateFloatAsState(targetValue = if (isSelected) 0.4f else 0.2f)
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(LocalAppColors.current.rowBackground.copy(alpha = bgAlpha))
+                            .clickable { viewModel.toggleFileSelection(file.uri) }
+                            .padding(12.dp)
+                            .then(
+                                if (isSelected) {
+                                    Modifier.border(
+                                        1.dp,
+                                        PrimaryCyan.copy(alpha = borderAlpha),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                } else {
+                                    Modifier.border(
+                                        1.dp,
+                                        Color.Gray.copy(alpha = borderAlpha),
+                                        RoundedCornerShape(12.dp)
+                                    )
+                                }
+                            ),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = file.isSelected,
+                            onCheckedChange = { viewModel.toggleFileSelection(file.uri) },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = PrimaryCyan,
+                                uncheckedColor = TextGray.copy(alpha = 0.5f)
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                file.name,
+                                color = TextWhite,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                fontSize = 14.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    Formatter.formatShortFileSize(context, file.size),
+                                    color = TextGray,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                val estimate = if (file.isSelected) sizeEstimates[file.uri.toString()] else null
+                                if (estimate != null && estimate in 1 until file.size) {
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        "→ ~${Formatter.formatShortFileSize(context, estimate)} (−${(100L - estimate * 100 / file.size)}%)",
+                                        color = SuccessColor,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -856,8 +872,8 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                     .background(
                         Brush.verticalGradient(
                             colors = listOf(
-                                Color(0xFF0B1120).copy(alpha = 0f),
-                                Color(0xFF0B1120).copy(alpha = 0.95f)
+                                LocalAppColors.current.scrim.copy(alpha = 0f),
+                                LocalAppColors.current.scrim.copy(alpha = 0.95f)
                             )
                         )
                     )
@@ -1021,7 +1037,7 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewMo
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color(0x591E293B)), // Transparent surface
+        colors = CardDefaults.cardColors(containerColor = LocalAppColors.current.surfaceTransparent),
         border = androidx.compose.foundation.BorderStroke(1.5.dp, PrimaryCyan.copy(alpha = 0.35f)), // Bright cyan-neon border
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
@@ -1084,7 +1100,7 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewMo
                     .height(6.dp)
                     .clip(RoundedCornerShape(3.dp)),
                 color = PrimaryCyan,
-                trackColor = Color(0xFF334155)
+                trackColor = LocalAppColors.current.unchecked
             )
 
             Row(
@@ -1120,13 +1136,13 @@ fun ActiveTaskCard(task: TranscodeTask, context: android.content.Context, viewMo
                     Icon(
                         Icons.Default.Info,
                         contentDescription = "HW Info",
-                        tint = Color(0xFF10B981),
+                        tint = AccentEmerald,
                         modifier = Modifier.size(16.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         if (task.isHdr) "Snapdragon HW HEVC 10-bit (HDR)" else "Snapdragon HW HEVC 8-bit",
-                        color = Color(0xFF10B981),
+                        color = AccentEmerald,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -1190,7 +1206,7 @@ fun QueueTaskItem(task: TranscodeTask, context: android.content.Context, viewMod
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0x331E293B)) // Transparent surface
+            .background(LocalAppColors.current.surfaceTransparent) // Transparent surface
             .border(0.5.dp, Color.Gray.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1268,7 +1284,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0x3D1E293B)), // Transparent surface
+            colors = CardDefaults.cardColors(containerColor = LocalAppColors.current.surfaceTransparent), // Transparent surface
             border = androidx.compose.foundation.BorderStroke(1.5.dp, PrimaryCyan.copy(alpha = 0.3f))
         ) {
             Column(
@@ -1311,7 +1327,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0x331E293B)),
+            colors = CardDefaults.cardColors(containerColor = LocalAppColors.current.surfaceTransparent),
             border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.25f))
         ) {
             Row(
@@ -1452,7 +1468,7 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(Color(0x331E293B)) // Transparent surface
+            .background(LocalAppColors.current.surfaceTransparent) // Transparent surface
             .border(0.5.dp, Color.Gray.copy(alpha = 0.15f), RoundedCornerShape(12.dp))
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1460,7 +1476,7 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
         Icon(
             Icons.Default.CheckCircle,
             contentDescription = "Success",
-            tint = Color(0xFF10B981),
+            tint = AccentEmerald,
             modifier = Modifier.size(24.dp)
         )
         Spacer(modifier = Modifier.width(12.dp))
@@ -1561,7 +1577,7 @@ fun UpdateDialog(viewModel: MainViewModel) {
         onDismissRequest = {
             if (!isDownloading) viewModel.dismissUpdateDialog()
         },
-        containerColor = Color(0xFF0F172A),
+        containerColor = LocalAppColors.current.surface,
         shape = RoundedCornerShape(20.dp),
         title = {
             Row(
@@ -1651,7 +1667,7 @@ fun UpdateDialog(viewModel: MainViewModel) {
                             .fillMaxWidth()
                             .heightIn(max = 160.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0x331E293B))
+                            .background(LocalAppColors.current.surfaceTransparent)
                             .padding(10.dp)
                             .verticalScroll(rememberScrollState())
                     ) {
@@ -1672,7 +1688,7 @@ fun UpdateDialog(viewModel: MainViewModel) {
                                 .height(6.dp)
                                 .clip(RoundedCornerShape(3.dp)),
                             color = PrimaryCyan,
-                            trackColor = Color(0xFF334155)
+                            trackColor = LocalAppColors.current.unchecked
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
