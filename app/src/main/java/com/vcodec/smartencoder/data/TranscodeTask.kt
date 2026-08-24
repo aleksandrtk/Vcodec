@@ -24,7 +24,6 @@ data class TranscodeTask(
     val compressedSize: Long = 0L,
     val status: TaskStatus = TaskStatus.PENDING,
     val progress: Float = 0.0f,
-    val speedFps: Float = 0.0f,
     val cpuTemp: Float = 0.0f,
     val targetBitrate: Int = 0,
     val originalBitrate: Int = 0,

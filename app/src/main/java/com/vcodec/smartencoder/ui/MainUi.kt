@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.vcodec.smartencoder.BuildConfig
 import com.vcodec.smartencoder.data.TaskStatus
 import com.vcodec.smartencoder.data.TranscodeTask
 import com.vcodec.smartencoder.ui.theme.AlertAmber
@@ -72,7 +73,7 @@ fun SmartEncoderAppContent(viewModel: MainViewModel) {
                 actions = {
                     val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsState()
                     IconButton(
-                        onClick = { viewModel.checkForUpdates("1.0.0", manual = true) }
+                        onClick = { viewModel.checkForUpdates(BuildConfig.VERSION_NAME, manual = true) }
                     ) {
                         if (isCheckingUpdate) {
                             CircularProgressIndicator(
@@ -294,6 +295,7 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
             val selectedCount = scannedFiles.count { it.isSelected }
             var sortMenuExpanded by remember { mutableStateOf(false) }
             val sortOrder by viewModel.sortOrder.collectAsState()
+            val onlyLargeFiles by viewModel.onlyLargeFiles.collectAsState()
 
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -350,7 +352,8 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            "${scannedFiles.size} videos found",
+                            if (onlyLargeFiles) "${scannedFiles.size} large videos (> 100 MB)"
+                            else "${scannedFiles.size} videos found",
                             color = TextWhite,
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp
@@ -430,18 +433,31 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                     }
                 }
 
-                // Item 3: Select all / Clear all
+                // Item 3: Large-file filter + Select all / Clear all
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        TextButton(onClick = { viewModel.toggleAllFilesSelection(true) }) {
-                            Text("Select All", color = PrimaryCyan)
-                        }
-                        TextButton(onClick = { viewModel.toggleAllFilesSelection(false) }) {
-                            Text("Clear All", color = TextGray)
+                        FilterChip(
+                            selected = onlyLargeFiles,
+                            onClick = { viewModel.setOnlyLargeFiles(!onlyLargeFiles) },
+                            label = { Text("> 100 MB", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                            colors = FilterChipDefaults.filterChipColors(
+                                containerColor = DarkSurface,
+                                selectedContainerColor = PrimaryCyan.copy(alpha = 0.2f),
+                                selectedLabelColor = PrimaryCyan,
+                                labelColor = TextGray
+                            )
+                        )
+                        Row {
+                            TextButton(onClick = { viewModel.toggleAllFilesSelection(true) }) {
+                                Text("Select All", color = PrimaryCyan)
+                            }
+                            TextButton(onClick = { viewModel.toggleAllFilesSelection(false) }) {
+                                Text("Clear All", color = TextGray)
+                            }
                         }
                     }
                 }
@@ -1160,7 +1176,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        "Installed: v1.0.0",
+                        "Installed: v${BuildConfig.VERSION_NAME}",
                         color = TextGray,
                         fontSize = 12.sp
                     )
@@ -1168,7 +1184,7 @@ fun HistoryScreen(viewModel: MainViewModel) {
 
                 val isCheckingUpdate by viewModel.isCheckingUpdate.collectAsState()
                 OutlinedButton(
-                    onClick = { viewModel.checkForUpdates("1.0.0", manual = true) },
+                    onClick = { viewModel.checkForUpdates(BuildConfig.VERSION_NAME, manual = true) },
                     enabled = !isCheckingUpdate,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryCyan),
                     border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.5f)),
@@ -1447,7 +1463,7 @@ fun UpdateDialog(viewModel: MainViewModel) {
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.padding(bottom = 12.dp)
                     ) {
-                        Text("Installed: v1.0.0", color = TextGray, fontSize = 13.sp)
+                        Text("Installed: v${BuildConfig.VERSION_NAME}", color = TextGray, fontSize = 13.sp)
                         Spacer(modifier = Modifier.width(12.dp))
                         Box(
                             modifier = Modifier
@@ -1514,7 +1530,7 @@ fun UpdateDialog(viewModel: MainViewModel) {
                     }
                 } else {
                     Text(
-                        "You are running the latest version of VCodec (v1.0.0). No new updates found on GitHub.",
+                        "You are running the latest version of VCodec (v${BuildConfig.VERSION_NAME}). No new updates found on GitHub.",
                         color = TextGray,
                         fontSize = 14.sp
                     )

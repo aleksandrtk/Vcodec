@@ -1,5 +1,6 @@
 # Proguard rules for Smart Encoder
-# Add custom keep rules here if needed for native NDK / JNI obfuscation support.
--keep class com.vcodec.smartencoder.metadata.MetadataRestorer {
-    private external boolean copyCustomMetadataBoxesFd(int, int);
+# Keep JNI-registered native methods so R8 does not break the native binding.
+-keepclassmembers class com.vcodec.smartencoder.metadata.MetadataRestorer {
+    private boolean copyCustomMetadataBoxesFd(int, int, long, long);
+    private boolean setFileDescriptorDatesFd(int, long, long);
 }

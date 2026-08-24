@@ -92,13 +92,25 @@ object MediaStorageManager {
 
     /**
      * Completes a pending MediaStore insertion (Android 10+).
+     * Re-asserts all original dates so the file keeps its exact position
+     * in the gallery's chronological timeline after compression/replacement.
      */
     fun finalizePendingUri(context: Context, uri: Uri, originalDates: MetadataRestorer.FileDates?) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val updateValues = ContentValues().apply {
                 put(MediaStore.Video.Media.IS_PENDING, 0)
                 if (originalDates != null) {
+                    // DATE_MODIFIED drives "modified" sorting; must be re-asserted because
+                    // MediaStore refreshes it to 'now' whenever the pending entry is written to.
                     put(MediaStore.Video.Media.DATE_MODIFIED, originalDates.dateModifiedSec)
+                    // DATE_ADDED + DATE_TAKEN drive the chronological timeline (Samsung Gallery
+                    // sorts primarily by DATE_TAKEN). Re-assert them on finalization.
+                    if (originalDates.dateAddedSec > 0) {
+                        put(MediaStore.Video.Media.DATE_ADDED, originalDates.dateAddedSec)
+                    }
+                    if (originalDates.dateTakenMs > 0) {
+                        put(MediaStore.Video.Media.DATE_TAKEN, originalDates.dateTakenMs)
+                    }
                 }
             }
             context.contentResolver.update(uri, updateValues, null, null)

@@ -7,6 +7,7 @@ import android.util.Log
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.vcodec.smartencoder.BuildConfig
 import com.vcodec.smartencoder.data.TaskRepository
 import com.vcodec.smartencoder.data.TaskStatus
 import com.vcodec.smartencoder.data.TranscodeTask
@@ -23,6 +24,12 @@ import kotlinx.coroutines.withContext
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     companion object {
         private const val TAG = "MainViewModel"
+
+        /** "Large video" threshold: files above this size are targeted by the large-file mode. */
+        const val LARGE_FILE_THRESHOLD_BYTES: Long = 100L * 1024 * 1024
+
+        fun passesSizeFilter(sizeBytes: Long, onlyLargeFiles: Boolean): Boolean =
+            !onlyLargeFiles || sizeBytes > LARGE_FILE_THRESHOLD_BYTES
     }
 
     private val repository = TaskRepository(application)
@@ -50,14 +57,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private val _scannedFiles = MutableStateFlow<List<ScannedFile>>(emptyList())
-    val scannedFiles: StateFlow<List<ScannedFile>> = combine(_scannedFiles, _sortOrder) { files, order ->
+    private val _onlyLargeFiles = MutableStateFlow(false)
+    val onlyLargeFiles: StateFlow<Boolean> = _onlyLargeFiles.asStateFlow()
+
+    fun setOnlyLargeFiles(enabled: Boolean) {
+        _onlyLargeFiles.value = enabled
+    }
+
+    val scannedFiles: StateFlow<List<ScannedFile>> = combine(_scannedFiles, _sortOrder, _onlyLargeFiles) { files, order, onlyLarge ->
+        val filtered = if (onlyLarge) files.filter { it.size > LARGE_FILE_THRESHOLD_BYTES } else files
         when (order) {
-            SortOrder.NAME_ASC -> files.sortedBy { it.name.lowercase() }
-            SortOrder.NAME_DESC -> files.sortedByDescending { it.name.lowercase() }
-            SortOrder.SIZE_ASC -> files.sortedBy { it.size }
-            SortOrder.SIZE_DESC -> files.sortedByDescending { it.size }
-            SortOrder.DATE_ASC -> files.sortedBy { it.lastModified }
-            SortOrder.DATE_DESC -> files.sortedByDescending { it.lastModified }
+            SortOrder.NAME_ASC -> filtered.sortedBy { it.name.lowercase() }
+            SortOrder.NAME_DESC -> filtered.sortedByDescending { it.name.lowercase() }
+            SortOrder.SIZE_ASC -> filtered.sortedBy { it.size }
+            SortOrder.SIZE_DESC -> filtered.sortedByDescending { it.size }
+            SortOrder.DATE_ASC -> filtered.sortedBy { it.lastModified }
+            SortOrder.DATE_DESC -> filtered.sortedByDescending { it.lastModified }
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -202,7 +217,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun toggleAllFilesSelection(selected: Boolean) {
-        val current = _scannedFiles.value.map { it.copy(isSelected = selected) }
+        val onlyLarge = _onlyLargeFiles.value
+        val current = _scannedFiles.value.map {
+            if (passesSizeFilter(it.size, onlyLarge)) it.copy(isSelected = selected) else it
+        }
         _scannedFiles.value = current
     }
 
@@ -234,7 +252,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun addSelectedToQueue() {
         viewModelScope.launch {
-            val toAdd = _scannedFiles.value.filter { it.isSelected }
+            val onlyLarge = _onlyLargeFiles.value
+            val toAdd = _scannedFiles.value.filter { it.isSelected && passesSizeFilter(it.size, onlyLarge) }
             val targetFolder = _selectedFolderUri.value?.toString()
 
             val codec = _targetCodec.value
@@ -427,8 +446,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
 
+                // Respect the large-file filter for gallery picks as well
+                val acceptedFiles = newFiles.filter { passesSizeFilter(it.size, _onlyLargeFiles.value) }
+
                 // Append to existing scanned files (user might have mixed folder + picker)
-                _scannedFiles.value = _scannedFiles.value + newFiles
+                _scannedFiles.value = _scannedFiles.value + acceptedFiles
 
                 // Store destination folder if provided
                 if (destFolderUri != null) {
@@ -441,81 +463,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     } catch (_: SecurityException) {}
                     _selectedFolderUri.value = destFolderUri
                     val folderDoc = DocumentFile.fromTreeUri(context, destFolderUri)
-                    _selectedFolderName.value = "📂 ${folderDoc?.name ?: "Destination"} (${newFiles.size} videos)"
+                    _selectedFolderName.value = "📂 ${folderDoc?.name ?: "Destination"} (${acceptedFiles.size} videos)"
                 } else {
-                    _selectedFolderName.value = "Gallery Selection (${newFiles.size} videos)"
-                }
-            }
-        }
-    }
-
-    fun addVideosFromPickerDirectlyToQueue(uris: List<Uri>) {
-        if (uris.isEmpty()) return
-        viewModelScope.launch {
-            withContext(Dispatchers.IO) {
-                val context: Context = getApplication()
-                val codec = _targetCodec.value
-                val res = _targetResolution.value
-                val preset = _qualityPreset.value
-                val keepOrig = _keepOriginal.value
-                val customBitrate = if (preset == "CUSTOM") (_customBitrateMbps.value * 1_000_000).toInt() else 0
-
-                for (uri in uris) {
-                    try {
-                        val takeFlags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                                        android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-                        context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-                    } catch (_: SecurityException) {
-                        try {
-                            context.contentResolver.takePersistableUriPermission(
-                                uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                            )
-                        } catch (_: SecurityException) {}
-                    }
-
-                    var name = "video.mp4"
-                    var size = 0L
-                    try {
-                        context.contentResolver.query(
-                            uri,
-                            arrayOf(
-                                android.provider.OpenableColumns.DISPLAY_NAME, 
-                                android.provider.OpenableColumns.SIZE
-                            ),
-                            null, null, null
-                        )?.use { cursor ->
-                            if (cursor.moveToFirst()) {
-                                name = cursor.getString(0) ?: "video.mp4"
-                                size = cursor.getLong(1)
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Failed to query URI metadata: ${e.message}")
-                    }
-
-                    val resolvedRelativePath = try {
-                        com.vcodec.smartencoder.metadata.MetadataRestorer.extractRelativePathFromMediaStore(context, uri)
-                    } catch (_: Exception) {
-                        null
-                    }
-
-                    val newTask = TranscodeTask(
-                        sourceUri = uri.toString(),
-                        sourcePath = resolvedRelativePath,
-                        destUri = null,
-                        destPath = null,
-                        fileName = name,
-                        originalSize = size,
-                        status = TaskStatus.PENDING,
-                        targetCodec = codec,
-                        targetWidth = 0,
-                        targetHeight = 0,
-                        targetResolution = res,
-                        qualityPreset = preset,
-                        targetBitrate = customBitrate,
-                        keepOriginal = keepOrig
-                    )
-                    repository.addTask(newTask)
+                    _selectedFolderName.value = "Gallery Selection (${acceptedFiles.size} videos)"
                 }
             }
         }
@@ -794,7 +744,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _updateError = MutableStateFlow<String?>(null)
     val updateError: StateFlow<String?> = _updateError.asStateFlow()
 
-    fun checkForUpdates(currentVersion: String = "1.0.0", manual: Boolean = true) {
+    fun checkForUpdates(currentVersion: String = BuildConfig.VERSION_NAME, manual: Boolean = true) {
         viewModelScope.launch {
             _isCheckingUpdate.value = true
             _updateError.value = null

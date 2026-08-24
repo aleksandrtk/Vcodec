@@ -283,7 +283,18 @@ class VideoTranscodeWorker(
                                 originalDates = originalDates
                             )
 
-                            MediaStorageManager.finalizePendingUri(context, finalUri, originalDates)
+                        MediaStorageManager.finalizePendingUri(context, finalUri, originalDates)
+                        // Final chronology assertion (Replace mode): the new MediaStore entry must
+                        // carry the original dates so the compressed video stays in place in the
+                        // gallery timeline instead of jumping to the top.
+                        if (originalDates != null) {
+                            MetadataRestorer.restoreMediaStoreDates(context, finalUri, originalDates)
+                        }
+                            // Final chronology assertion: guarantee DATE_TAKEN/DATE_ADDED/DATE_MODIFIED
+                            // in MediaStore so the file stays at its original timeline position.
+                            if (originalDates != null) {
+                                MetadataRestorer.restoreMediaStoreDates(context, finalUri, originalDates)
+                            }
                             compressedSize = MediaStorageManager.getUriSize(context, finalUri)
                         } else {
                             throw java.io.IOException("Failed to obtain output URI for keep-original mode")

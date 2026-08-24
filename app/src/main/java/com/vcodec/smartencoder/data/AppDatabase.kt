@@ -14,7 +14,7 @@ class Converters {
     fun fromStatus(status: TaskStatus) = status.name
 }
 
-@Database(entities = [TranscodeTask::class], version = 4, exportSchema = false)
+@Database(entities = [TranscodeTask::class], version = 5, exportSchema = false)
 @androidx.room.TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
