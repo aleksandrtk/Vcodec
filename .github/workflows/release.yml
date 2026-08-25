@@ -80,13 +80,13 @@ jobs:
       - name: Run unit tests
         run: |
           set -o pipefail
-          ./gradlew testDebugUnitTest --stacktrace 2>&1 | tee build_test_output.log
+          ./gradlew testDebugUnitTest --parallel --build-cache --stacktrace 2>&1 | tee build_test_output.log
 
       - name: Build Release APK
         if: success()
         run: |
           set -o pipefail
-          ./gradlew assembleRelease --stacktrace 2>&1 | tee build_apk_output.log
+          ./gradlew assembleRelease --parallel --build-cache --stacktrace 2>&1 | tee build_apk_output.log
 
       - name: Prepare APK artifact
         run: |

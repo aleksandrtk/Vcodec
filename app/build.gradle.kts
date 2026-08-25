@@ -24,7 +24,7 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags("-std=c++17")
-                abiFilters("arm64-v8a", "x86_64", "armeabi-v7a", "x86") // Broad ABI support (Samsung devices, emulators, etc.)
+                abiFilters("arm64-v8a", "x86_64") // Modern 64-bit devices (ARM) & Emulators (x86_64)
             }
         }
     }
