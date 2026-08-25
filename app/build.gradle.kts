@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val baseVersion = "2.7.9"
 val channel = project.findProperty("channel")?.toString() ?: "stable"
 
 android {
@@ -22,7 +23,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 11
-        versionName = if (channel == "dev") "2.7.9-dev" else "2.7.9"
+        versionName = if (channel == "dev") "$baseVersion-dev" else baseVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
