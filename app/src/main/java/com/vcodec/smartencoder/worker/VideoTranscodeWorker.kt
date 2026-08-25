@@ -49,20 +49,47 @@ class VideoTranscodeWorker(
         }
 
         val inputTaskId = inputData.getLong("TASK_ID", -1L)
-        
-        var currentTask = if (inputTaskId != -1L) {
-            taskDao.getTaskById(inputTaskId)
-        } else {
-            taskDao.getNextPendingTask()
-        }
+        var pickSpecific = inputTaskId != -1L
 
-        if (currentTask == null || currentTask.status == TaskStatus.PAUSED) {
-            Log.i(TAG, "No valid pending task found.")
-            return@withContext Result.success()
-        }
+        // Process the ENTIRE pending queue in this single worker run: one worker =
+        // many files, sequentially. Previously each run handled exactly one task and
+        // relied on chained WorkManager requests — a single Result.failure() broke
+        // the APPEND chain and silently cancelled every remaining queued file.
+        while (true) {
+            val currentTask = if (pickSpecific) {
+                pickSpecific = false
+                taskDao.getTaskById(inputTaskId)
+            } else {
+                taskDao.getNextPendingTask()
+            }
 
+            if (currentTask == null || currentTask.status == TaskStatus.PAUSED) {
+                Log.i(TAG, "Queue drained: no more pending tasks.")
+                break
+            }
+
+            Log.i(TAG, "Starting processing of Task ${currentTask.id}: ${currentTask.fileName}")
+
+            val outcome = try {
+                processTask(currentTask)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Unhandled exception during transcoding: ${e.message}", e)
+                markTaskFailed(currentTask.id, e.message ?: "Unknown compression exception.")
+                Result.failure()
+            }
+
+            // A retry means the run was interrupted (system cancellation) — bubble it up.
+            // Any individual failure/success just moves on to the next pending file.
+            if (outcome == Result.retry()) return@withContext outcome
+        }
+        return@withContext Result.success()
+    }
+
+    private suspend fun processTask(currentTask0: TranscodeTask): Result = withContext(Dispatchers.IO) {
+        val currentTask = currentTask0
         val taskId = currentTask.id
-        Log.i(TAG, "Starting processing of Task $taskId: ${currentTask.fileName}")
 
         try {
             // 1. Mark as ANALYZING
