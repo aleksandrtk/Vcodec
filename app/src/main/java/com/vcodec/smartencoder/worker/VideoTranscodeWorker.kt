@@ -88,7 +88,7 @@ class VideoTranscodeWorker(
     }
 
     private suspend fun processTask(currentTask0: TranscodeTask): Result = withContext(Dispatchers.IO) {
-        val currentTask = currentTask0
+        var currentTask = currentTask0
         val taskId = currentTask.id
 
         try {
