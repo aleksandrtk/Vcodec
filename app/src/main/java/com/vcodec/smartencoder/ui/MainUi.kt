@@ -994,6 +994,42 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                     }
                 }
 
+                // Everything is hidden by the "Hide compressed" filter
+                val rawScannedCount by viewModel.rawScannedCount.collectAsState()
+                if (scannedFiles.isEmpty() && rawScannedCount > 0) {
+                    item {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(containerColor = AccentEmerald.copy(alpha = 0.08f)),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, AccentEmerald.copy(alpha = 0.3f))
+                        ) {
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Icon(
+                                    Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = AccentEmerald,
+                                    modifier = Modifier.size(32.dp)
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "All $rawScannedCount files are already compressed",
+                                    color = TextWhite,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                TextButton(onClick = { viewModel.setIgnoreCompressed(false) }) {
+                                    Text("Show full list", color = PrimaryCyan, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Item 7 (moved): pinned Run button now lives below the list
                 item {
                     Spacer(modifier = Modifier.height(8.dp))

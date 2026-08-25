@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,13 +82,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _onlyLargeFiles.value = enabled
     }
 
-    /** When on, files that already have a "_compressed" copy (or are one) are hidden. */
-    private val _ignoreCompressed = MutableStateFlow(true)
+    /** When on, files that already have a "_compressed" copy (or are one) are hidden. Off by default. */
+    private val _ignoreCompressed = MutableStateFlow(false)
     val ignoreCompressed: StateFlow<Boolean> = _ignoreCompressed.asStateFlow()
 
     fun setIgnoreCompressed(enabled: Boolean) {
         _ignoreCompressed.value = enabled
     }
+
+    /** Unfiltered scanned-file count (used to detect "everything hidden by filters"). */
+    val rawScannedCount: StateFlow<Int> = _scannedFiles
+        .map { it.size }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
     val scannedFiles: StateFlow<List<ScannedFile>> = combine(
         _scannedFiles, _sortOrder, _onlyLargeFiles, _ignoreCompressed, allTasks
