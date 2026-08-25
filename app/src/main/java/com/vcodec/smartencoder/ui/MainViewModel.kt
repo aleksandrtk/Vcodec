@@ -90,8 +90,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     val scannedFiles: StateFlow<List<ScannedFile>> = combine(
-        _scannedFiles, _sortOrder, _onlyLargeFiles, _ignoreCompressed
-    ) { files, order, onlyLarge, ignoreCompressed ->
+        _scannedFiles, _sortOrder, _onlyLargeFiles, _ignoreCompressed, allTasks
+    ) { files, order, onlyLarge, ignoreCompressed, tasks ->
         var filtered = if (onlyLarge) files.filter { passesSizeFilter(it.size, true) } else files
         if (ignoreCompressed) {
             // Names of the ORIGINALS that already have a "<base>_compressed.<ext>" twin
@@ -103,8 +103,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     originalsWithTwin.add("${base}.${ext}".lowercase())
                 }
             }
+
+            // Replace-mode completions: the compressed file KEEPS the original name,
+            // so detect them via the task history instead — by destination MediaStore ID
+            // or by (display name + exact compressed byte size).
+            val completedDestIds = HashSet<Long>()
+            val replacedNameSizes = HashMap<String, MutableSet<Long>>()
+            for (t in tasks) {
+                if (t.status != TaskStatus.COMPLETED || t.compressedSize <= 0L) continue
+                t.destUri?.let { Uri.parse(it).lastPathSegment?.toLongOrNull() }?.let {
+                    completedDestIds.add(it)
+                }
+                replacedNameSizes.getOrPut(t.fileName.lowercase()) { HashSet() }.add(t.compressedSize)
+            }
+
             filtered = filtered.filter { f ->
-                compressedBaseOf(f.name) == null && f.name.lowercase() !in originalsWithTwin
+                if (compressedBaseOf(f.name) != null) return@filter false          // IS a _compressed copy
+                if (f.name.lowercase() in originalsWithTwin) return@filter false   // has a _compressed twin
+                val fid = f.uri.lastPathSegment?.toLongOrNull()
+                if (fid != null && fid in completedDestIds) return@filter false    // IS a replace-mode output
+                val sizes = replacedNameSizes[f.name.lowercase()]
+                !(sizes != null && f.size in sizes)                                // same name + same size as a replace output
             }
         }
         when (order) {
