@@ -1494,8 +1494,6 @@ fun HistoryScreen(viewModel: MainViewModel) {
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        var isFixingDates by remember { mutableStateOf(false) }
-
         Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1507,45 +1505,6 @@ fun HistoryScreen(viewModel: MainViewModel) {
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
-            if (completedTasks.isNotEmpty()) {
-                Button(
-                    onClick = {
-                        isFixingDates = true
-                        viewModel.fixAllCompletedTasksDates { success, failed ->
-                            isFixingDates = false
-                            android.widget.Toast.makeText(
-                                context,
-                                "Dates restored for $success files (Failed/skipped: $failed)",
-                                android.widget.Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    },
-                    enabled = !isFixingDates,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = PrimaryCyan.copy(alpha = 0.2f),
-                        contentColor = PrimaryCyan
-                    ),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                    modifier = Modifier.height(36.dp)
-                ) {
-                    if (isFixingDates) {
-                        CircularProgressIndicator(
-                            color = PrimaryCyan,
-                            modifier = Modifier.size(16.dp),
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Fix Dates",
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("Fix Gallery Dates", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
         }
 
         if (completedTasks.isEmpty()) {
@@ -1655,8 +1614,6 @@ fun FolderPickerDialog(
 
 @Composable
 fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel: MainViewModel) {
-    var isFixing by remember { mutableStateOf(false) }
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1693,43 +1650,12 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
             }
         }
 
-        // Fix Date Button for this specific item
-        IconButton(
-            onClick = {
-                isFixing = true
-                viewModel.fixSingleTaskDate(task.id) { success ->
-                    isFixing = false
-                    android.widget.Toast.makeText(
-                        context,
-                        if (success) "Date restored for ${task.fileName}" else "Failed to restore date",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
-                }
-            },
-            enabled = !isFixing
-        ) {
-            if (isFixing) {
-                CircularProgressIndicator(
-                    color = PrimaryCyan,
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp
-                )
-            } else {
-                Icon(
-                    imageVector = Icons.Default.Refresh,
-                    contentDescription = "Restore Original Date",
-                    tint = PrimaryCyan.copy(alpha = 0.7f)
-                )
-            }
-        }
-
         // Open in Gallery Button
         IconButton(
             onClick = {
                 val targetUri = task.destUri ?: task.sourceUri
                 openVideoInGallery(context, targetUri)
-            },
-            enabled = !isFixing
+            }
         ) {
             Icon(
                 imageVector = Icons.Default.PlayArrow,
@@ -1738,10 +1664,9 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
             )
         }
 
-        // Open the gallery video grid (tiles) to visually verify the file's timeline position
+        // Open the gallery app grid (albums/timeline) to visually verify the file's position
         IconButton(
-            onClick = { openVideoCollectionInGallery(context, task.destUri ?: task.sourceUri) },
-            enabled = !isFixing
+            onClick = { openGalleryGrid(context, task) }
         ) {
             Icon(
                 imageVector = Icons.Default.GridView,
@@ -1753,20 +1678,16 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
 }
 
 /**
- * Opens the device gallery app positioned at the given video (the user can navigate
- * the surrounding timeline from there). Crucially, we resolve the file to its real
- * MediaStore URI and target known gallery apps EXPLICITLY via setPackage — otherwise
- * Android shows a generic "open with player" chooser instead of the gallery.
+ * Opens the device gallery app's MAIN GRID (albums / chronological timeline) so the
+ * user can visually verify where the compressed file sits in the list (e.g. confirm
+ * it did NOT jump to the top). We deliberately do NOT open the video itself —
+ * viewing a media URI launches a fullscreen player instead of the grid.
+ *
+ * Launching activities is exempt from Android 11+ package visibility filtering,
+ * so we can target known gallery packages directly by setPackage().
  */
-fun openVideoCollectionInGallery(context: android.content.Context, uriString: String?) {
-    val mediaUri = resolveMediaStoreVideoUri(context, uriString)
-        ?: android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-
-    // Explicit gallery packages first — avoids the video-player chooser dialog.
-    // NOTE: do NOT use PackageManager.resolveActivity() here — on Android 11+ package
-    // visibility filtering makes it return null for every external app unless <queries>
-    // is declared. startActivity() itself is exempt from that filtering, so we just
-    // attempt the launch and catch ActivityNotFoundException.
+fun openGalleryGrid(context: android.content.Context, task: TranscodeTask) {
+    // Known gallery launcher packages, tried in order
     val galleryPackages = listOf(
         "com.google.android.apps.photos",   // Google Photos
         "com.sec.android.gallery3d",        // Samsung Gallery
@@ -1777,41 +1698,32 @@ fun openVideoCollectionInGallery(context: android.content.Context, uriString: St
     )
     for (pkg in galleryPackages) {
         try {
-            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-                setDataAndType(mediaUri, "video/*")
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+                addCategory(android.content.Intent.CATEGORY_LAUNCHER)
                 setPackage(pkg)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
+            android.widget.Toast.makeText(
+                context,
+                "Find \"${task.fileName}\" and check its position in the timeline",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
             return
         } catch (_: Exception) {
-            // Package missing or refused the intent — try the next one
+            // Package missing or refused — try the next one
         }
     }
 
-    // Fallback: generic view intent with the resolved MediaStore URI
+    // Fallback: whatever app handles CATEGORY_APP_GALLERY (default gallery)
     try {
-        val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-            setDataAndType(mediaUri, "video/*")
+        val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+            addCategory(android.content.Intent.CATEGORY_APP_GALLERY)
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(intent)
     } catch (e: Exception) {
         android.widget.Toast.makeText(context, "Cannot open gallery: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
-    }
-}
-
-/** Resolves any stored URI (MediaStore, SAF document, file path) to a real content://media/... video URI. */
-private fun resolveMediaStoreVideoUri(context: android.content.Context, uriString: String?): Uri? {
-    if (uriString.isNullOrBlank()) return null
-    return try {
-        val uri = Uri.parse(uriString)
-        com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, uri)
-            ?.takeIf { it.authority == android.provider.MediaStore.AUTHORITY }
-    } catch (e: Exception) {
-        null
     }
 }
 
