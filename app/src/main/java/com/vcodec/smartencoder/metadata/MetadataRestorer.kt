@@ -562,9 +562,9 @@ object MetadataRestorer {
      */
     fun parseDateFromFileName(fileName: String): FileDates? {
         try {
-            // Match 8 digits (date) followed by an underscore or dash and then 6 digits (time)
-            // e.g. "20240710_220630"
-            val regex = Regex("(\\d{4})(\\d{2})(\\d{2})[-_\\s](\\d{2})(\\d{2})(\\d{2})")
+            // Match date (YYYYMMDD or YYYY-MM-DD) followed by separator and time (HHMMSS or HH-MM-SS)
+            // e.g. "20240710_220630", "2023-12-25-143000", "2023-12-25_14-30-00"
+            val regex = Regex("(\\d{4})[-_\\s]?(\\d{2})[-_\\s]?(\\d{2})[-_\\s](\\d{2})[-_\\s]?(\\d{2})[-_\\s]?(\\d{2})")
             val match = regex.find(fileName)
             if (match != null) {
                 val year = match.groups[1]?.value?.toInt() ?: 2024
@@ -576,6 +576,7 @@ object MetadataRestorer {
 
                 val calendar = java.util.Calendar.getInstance()
                 calendar.set(year, month, day, hour, minute, second)
+                calendar.set(java.util.Calendar.MILLISECOND, 0)
                 val ms = calendar.timeInMillis
                 val sec = ms / 1000
                 Log.i(TAG, "Parsed date from filename '$fileName': $calendar")
