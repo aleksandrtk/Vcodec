@@ -479,6 +479,7 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
             var sortMenuExpanded by remember { mutableStateOf(false) }
             val sortOrder by viewModel.sortOrder.collectAsState()
             val onlyLargeFiles by viewModel.onlyLargeFiles.collectAsState()
+            val rawScannedCount by viewModel.rawScannedCount.collectAsState()
 
             val onRunClick: () -> Unit = {
                 val selectedFiles = scannedFiles.filter { it.isSelected }
@@ -995,7 +996,6 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                 }
 
                 // Everything is hidden by the "Hide compressed" filter
-                val rawScannedCount by viewModel.rawScannedCount.collectAsState()
                 if (scannedFiles.isEmpty() && rawScannedCount > 0) {
                     item {
                         Card(
