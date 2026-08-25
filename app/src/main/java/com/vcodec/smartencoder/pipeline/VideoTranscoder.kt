@@ -156,7 +156,7 @@ object VideoTranscoder {
 
             if (useInAppMuxer) {
                 // Bypasses the device's MediaMuxer ("Muxer failed" workaround)
-                builder.setMuxerFactory(androidx.media3.transformer.InAppMp4Muxer.Factory())
+                builder.setMuxerFactory(androidx.media3.transformer.InAppMuxer.Factory())
             }
 
             transformer = builder.build()
