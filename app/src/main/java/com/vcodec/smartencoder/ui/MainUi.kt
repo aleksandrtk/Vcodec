@@ -56,6 +56,8 @@ import com.vcodec.smartencoder.ui.theme.PrimaryCyan
 import com.vcodec.smartencoder.ui.theme.SuccessColor
 import com.vcodec.smartencoder.ui.theme.TextGray
 import com.vcodec.smartencoder.ui.theme.TextWhite
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1614,6 +1616,8 @@ fun FolderPickerDialog(
 
 @Composable
 fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel: MainViewModel) {
+    var showLocate by remember { mutableStateOf(false) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1664,9 +1668,9 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
             )
         }
 
-        // Open the gallery app grid (albums/timeline) to visually verify the file's position
+        // Locate the file's position in the gallery timeline (in-app, auto-scrolled & highlighted)
         IconButton(
-            onClick = { openGalleryGrid(context, task) }
+            onClick = { showLocate = true }
         ) {
             Icon(
                 imageVector = Icons.Default.GridView,
@@ -1675,55 +1679,207 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
             )
         }
     }
+
+    if (showLocate) {
+        LocateInTimelineDialog(
+            task = task,
+            onDismiss = { showLocate = false }
+        )
+    }
 }
 
+/** A video entry in the gallery timeline, newest first. */
+private data class TimelineVideo(val id: Long, val name: String, val dateMs: Long)
+
 /**
- * Opens the device gallery app's MAIN GRID (albums / chronological timeline) so the
- * user can visually verify where the compressed file sits in the list (e.g. confirm
- * it did NOT jump to the top). We deliberately do NOT open the video itself —
- * viewing a media URI launches a fullscreen player instead of the grid.
+ * In-app "Where is this file?" view: shows the device's video timeline (MediaStore,
+ * newest first) as a thumbnail grid, auto-scrolled to the given task's file with a
+ * highlighted frame — so the user can instantly see its chronological position
+ * (e.g. confirm it did NOT jump to the top after compression).
  *
- * Launching activities is exempt from Android 11+ package visibility filtering,
- * so we can target known gallery packages directly by setPackage().
+ * Third-party gallery apps expose no API for scrolling to an item without playing it,
+ * so this is implemented natively.
  */
-fun openGalleryGrid(context: android.content.Context, task: TranscodeTask) {
-    // Known gallery launcher packages, tried in order
-    val galleryPackages = listOf(
-        "com.google.android.apps.photos",   // Google Photos
-        "com.sec.android.gallery3d",        // Samsung Gallery
-        "com.miui.gallery",                 // Xiaomi Gallery
-        "com.oneplus.gallery",              // OnePlus Gallery
-        "com.coloros.gallery3d",            // OPPO/Realme Gallery
-        "com.huawei.hidisk"                 // Huawei Gallery fallback
-    )
-    for (pkg in galleryPackages) {
-        try {
-            val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
-                addCategory(android.content.Intent.CATEGORY_LAUNCHER)
-                setPackage(pkg)
-                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+@Composable
+fun LocateInTimelineDialog(task: TranscodeTask, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    var videos by remember { mutableStateOf<List<TimelineVideo>?>(null) }
+
+    // Resolve target MediaStore id from destUri/sourceUri (content://media/external/video/media/<id>)
+    val targetId = remember(task) {
+        sequenceOf(task.destUri, task.sourceUri).filterNotNull()
+            .mapNotNull { Uri.parse(it).lastPathSegment?.toLongOrNull() }
+            .firstOrNull()
+    }
+    val targetName = task.fileName.lowercase()
+
+    LaunchedEffect(task) {
+        val list = withContext(Dispatchers.IO) {
+            try {
+                context.contentResolver.query(
+                    android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(
+                        android.provider.MediaStore.Video.VideoColumns._ID,
+                        android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME,
+                        android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED
+                    ),
+                    null, null,
+                    "${android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED} DESC"
+                )?.use { cursor ->
+                    val idIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns._ID)
+                    val nameIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME)
+                    val dateIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
+                    buildList {
+                        while (cursor.moveToNext() && size < 600) {
+                            add(
+                                TimelineVideo(
+                                    id = cursor.getLong(idIdx),
+                                    name = cursor.getString(nameIdx).orEmpty(),
+                                    dateMs = if (dateIdx != -1 && !cursor.isNull(dateIdx)) cursor.getLong(dateIdx) * 1000L else 0L
+                                )
+                            )
+                        }
+                    }
+                } ?: emptyList()
+            } catch (e: Exception) {
+                emptyList()
             }
-            context.startActivity(intent)
-            android.widget.Toast.makeText(
-                context,
-                "Find \"${task.fileName}\" and check its position in the timeline",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
-            return
-        } catch (_: Exception) {
-            // Package missing or refused — try the next one
+        }
+        videos = list
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close", color = PrimaryCyan) }
+        },
+        containerColor = DarkSurface,
+        titleContentColor = TextWhite,
+        textContentColor = TextGray,
+        title = {
+            Column {
+                Text("Position in Gallery", fontWeight = FontWeight.Bold)
+                Text(
+                    "Newest first \u2022 highlighted = ${task.fileName}",
+                    fontSize = 11.sp,
+                    color = TextGray,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        },
+        text = {
+            when {
+                videos == null -> Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) { CircularProgressIndicator(color = PrimaryCyan) }
+                videos!!.isEmpty() -> Text("No videos found on this device.")
+                else -> {
+                    val list = videos!!
+                    val targetIndex = list.indexOfFirst { v ->
+                        v.id == targetId || (targetId == null && v.name.lowercase() == targetName)
+                    }
+                    val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+
+                    // Auto-scroll so the target tile is visible near the top
+                    LaunchedEffect(list) {
+                        if (targetIndex > 0) {
+                            gridState.scrollToItem((targetIndex - 3).coerceAtLeast(0))
+                        }
+                    }
+
+                    androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                        columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(3),
+                        state = gridState,
+                        modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(list.size) { index ->
+                            val video = list[index]
+                            val isTarget = index == targetIndex
+                            val contentUri = android.content.ContentUris.withAppendedId(
+                                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, video.id
+                            )
+                            Column {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .aspectRatio(1f)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color.Black.copy(alpha = 0.3f))
+                                        .border(
+                                            if (isTarget) 2.dp else 0.5.dp,
+                                            if (isTarget) AccentEmerald else Color.Gray.copy(alpha = 0.25f),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                ) {
+                                    VideoThumbnail(uri = contentUri, modifier = Modifier.fillMaxSize())
+                                    if (isTarget) {
+                                        Icon(
+                                            Icons.Default.CheckCircle,
+                                            contentDescription = "This file",
+                                            tint = AccentEmerald,
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(4.dp)
+                                                .size(18.dp)
+                                        )
+                                    }
+                                }
+                                if (isTarget) {
+                                    Text(
+                                        "\u2191 ${video.dateMs.takeIf { it > 0 }?.let { java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT).format(java.util.Date(it)) } ?: "?"}",
+                                        color = AccentEmerald,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(top = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun VideoThumbnail(uri: Uri, modifier: Modifier = Modifier) {
+    val context = LocalContext.current
+    var bitmap by remember(uri) { mutableStateOf<android.graphics.Bitmap?>(null) }
+
+    LaunchedEffect(uri) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            withContext(Dispatchers.IO) {
+                bitmap = try {
+                    context.contentResolver.loadThumbnail(uri, android.util.Size(200, 200), null)
+                } catch (_: Exception) {
+                    null
+                }
+            }
         }
     }
 
-    // Fallback: whatever app handles CATEGORY_APP_GALLERY (default gallery)
-    try {
-        val intent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
-            addCategory(android.content.Intent.CATEGORY_APP_GALLERY)
-            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+    Box(modifier, contentAlignment = Alignment.Center) {
+        val bmp = bitmap
+        if (bmp != null) {
+            androidx.compose.foundation.Image(
+                bitmap = androidx.compose.ui.graphics.asImageBitmap(bmp),
+                contentDescription = null,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.matchParentSize()
+            )
+        } else {
+            Icon(
+                Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = Color.White.copy(alpha = 0.4f),
+                modifier = Modifier.size(24.dp)
+            )
         }
-        context.startActivity(intent)
-    } catch (e: Exception) {
-        android.widget.Toast.makeText(context, "Cannot open gallery: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
     }
 }
 
