@@ -56,6 +56,9 @@ import com.vcodec.smartencoder.ui.theme.PrimaryCyan
 import com.vcodec.smartencoder.ui.theme.SuccessColor
 import com.vcodec.smartencoder.ui.theme.TextGray
 import com.vcodec.smartencoder.ui.theme.TextWhite
+import androidx.compose.foundation.Image
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
@@ -1866,10 +1869,10 @@ fun VideoThumbnail(uri: Uri, modifier: Modifier = Modifier) {
     Box(modifier, contentAlignment = Alignment.Center) {
         val bmp = bitmap
         if (bmp != null) {
-            androidx.compose.foundation.Image(
-                bitmap = androidx.compose.ui.graphics.asImageBitmap(bmp),
+            Image(
+                bitmap = bmp.asImageBitmap(),
                 contentDescription = null,
-                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                contentScale = ContentScale.Crop,
                 modifier = Modifier.matchParentSize()
             )
         } else {
