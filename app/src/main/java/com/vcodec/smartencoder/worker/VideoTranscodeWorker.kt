@@ -63,9 +63,22 @@ class VideoTranscodeWorker(
                 taskDao.getNextPendingTask()
             }
 
-            if (currentTask == null || currentTask.status == TaskStatus.PAUSED) {
+            if (currentTask == null) {
                 Log.i(TAG, "Queue drained: no more pending tasks.")
                 break
+            }
+
+            // Skip tasks already handled by a previous run of this chain.
+            // CRITICAL: every addTask() appends its own worker with a specific TASK_ID,
+            // but the FIRST worker already drains the whole queue — so the appended
+            // workers wake up to find their task COMPLETED. Re-running it would
+            // re-analyze a deleted source (replace mode) and overwrite COMPLETED -> FAILED.
+            if (currentTask.status != TaskStatus.PENDING &&
+                currentTask.status != TaskStatus.ANALYZING &&
+                currentTask.status != TaskStatus.PROCESSING
+            ) {
+                Log.i(TAG, "Skipping task ${currentTask.id}: already ${currentTask.status}")
+                continue
             }
 
             Log.i(TAG, "Starting processing of Task ${currentTask.id}: ${currentTask.fileName}")
