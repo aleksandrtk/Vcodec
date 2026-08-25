@@ -28,9 +28,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         /** "Large video" threshold: files above this size are targeted by the large-file mode. */
         const val LARGE_FILE_THRESHOLD_BYTES: Long = 100L * 1024 * 1024
 
-        /** Emit scanned-list updates to the UI in batches to avoid O(n^2) recomposition storms. */
-        private const val SCAN_EMIT_BATCH_SIZE = 20
-
         /**
          * Files with unknown size (0 bytes reported by some gallery providers,
          * e.g. Samsung Gallery ACTION_PICK) always pass the filter — otherwise
@@ -102,140 +99,151 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val isSelected: Boolean = false
     )
 
-    fun selectFolder(uri: Uri) {
-        _selectedFolderUri.value = uri
-        val doc = DocumentFile.fromTreeUri(getApplication(), uri)
-        _selectedFolderName.value = doc?.name ?: "Selected Folder"
-        scanFolder(uri)
-    }
+    /** A folder (MediaStore bucket) that contains videos, shown in the in-app folder picker. */
+    data class FolderBucket(
+        val name: String,
+        val relativePath: String,
+        val videoCount: Int,
+        val totalSizeBytes: Long
+    )
 
-    private fun scanFolder(treeUri: Uri) {
+    private val _folderBuckets = MutableStateFlow<List<FolderBucket>>(emptyList())
+    val folderBuckets: StateFlow<List<FolderBucket>> = _folderBuckets.asStateFlow()
+
+    private val _isLoadingBuckets = MutableStateFlow(false)
+    val isLoadingBuckets: StateFlow<Boolean> = _isLoadingBuckets.asStateFlow()
+
+    /**
+     * Lists all on-device folders containing videos with a SINGLE bulk MediaStore query.
+     * Replaces the SAF tree picker: no system file manager, no per-directory binder walks —
+     * the whole scan is one in-process database query, so it is instant even for huge libraries.
+     */
+    fun loadFolderBuckets() {
+        if (_isLoadingBuckets.value) return
+        _isLoadingBuckets.value = true
         viewModelScope.launch {
-            _isScanning.value = true
-            _scannedFiles.value = emptyList()
-
-            withContext(Dispatchers.IO) {
-                val list = mutableListOf<ScannedFile>()
-                try {
-                    // ONE bulk MediaStore query instead of per-file lookups:
-                    // per-file resolve+query made scanning O(N) binder calls (very slow on Samsung,
-                    // where SAF LAST_MODIFIED is often 0 for every single video).
-                    val mediaStoreDates = preloadMediaStoreDates(getApplication())
-                    val rootId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
-                    scanDirectoryContract(getApplication(), treeUri, rootId, list, mediaStoreDates)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error scanning folder: ${e.message}", e)
-                }
-                // Final emission: guarantees the UI shows the complete result
-                _scannedFiles.value = list.toList()
-            }
-            _isScanning.value = false
+            val buckets = withContext(Dispatchers.IO) { queryFolderBuckets(getApplication()) }
+            _folderBuckets.value = buckets
+            _isLoadingBuckets.value = false
         }
     }
 
-    /**
-     * Single bulk query over the whole MediaStore video table:
-     * display name -> last modified millis. O(1) lookups during the SAF walk.
-     */
-    private fun preloadMediaStoreDates(context: Context): Map<String, Long> {
-        val map = HashMap<String, Long>()
+    private fun queryFolderBuckets(context: Context): List<FolderBucket> {
+        data class Acc(var count: Int = 0, var size: Long = 0L)
+
+        val byPath = LinkedHashMap<String, Acc>()
         try {
             context.contentResolver.query(
                 android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
                 arrayOf(
-                    android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME,
-                    android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
-                    android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
+                    android.provider.MediaStore.Video.VideoColumns.BUCKET_DISPLAY_NAME,
+                    android.provider.MediaStore.Video.VideoColumns.RELATIVE_PATH,
+                    android.provider.MediaStore.Video.VideoColumns.SIZE
                 ),
                 null, null, null
             )?.use { cursor ->
-                val nameIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME)
-                val modIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
-                val addIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
+                val bucketIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.BUCKET_DISPLAY_NAME)
+                val pathIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.RELATIVE_PATH)
+                val sizeIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.SIZE)
                 while (cursor.moveToNext()) {
-                    val name = cursor.getString(nameIdx) ?: continue
-                    val sec = when {
-                        modIdx != -1 && !cursor.isNull(modIdx) && cursor.getLong(modIdx) > 0 -> cursor.getLong(modIdx)
-                        addIdx != -1 && !cursor.isNull(addIdx) && cursor.getLong(addIdx) > 0 -> cursor.getLong(addIdx)
-                        else -> 0L
+                    val relPath = if (pathIdx != -1 && !cursor.isNull(pathIdx)) cursor.getString(pathIdx).orEmpty() else ""
+                    val bucketName = when {
+                        bucketIdx != -1 && !cursor.isNull(bucketIdx) -> cursor.getString(bucketIdx)
+                        relPath.isNotBlank() -> relPath.trim('/')
+                        else -> "Internal Storage"
                     }
-                    if (sec > 0) {
-                        val key = name.lowercase()
-                        if (!map.containsKey(key)) map[key] = sec * 1000L
-                    }
+                    val key = "$bucketName|$relPath"
+                    val acc = byPath.getOrPut(key) { Acc() }
+                    acc.count++
+                    if (sizeIdx != -1 && !cursor.isNull(sizeIdx)) acc.size += cursor.getLong(sizeIdx)
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "MediaStore date preload failed: ${e.message}")
+            Log.e(TAG, "Failed to query MediaStore buckets: ${e.message}", e)
         }
-        return map
+
+        return byPath.mapNotNull { (key, acc) ->
+            val name = key.substringBeforeLast('|').ifBlank { "Internal Storage" }
+            val relPath = key.substringAfterLast('|')
+            FolderBucket(name, relPath, acc.count, acc.size)
+        }.sortedWith(compareByDescending<FolderBucket> { it.videoCount }.thenBy { it.name.lowercase() })
     }
 
-    private fun scanDirectoryContract(
-        context: Context,
-        treeUri: Uri,
-        documentId: String,
-        list: MutableList<ScannedFile>,
-        mediaStoreDates: Map<String, Long>
-    ) {
-        val childrenUri = android.provider.DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, documentId)
-        val projection = arrayOf(
-            android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-            android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-            android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE,
-            android.provider.DocumentsContract.Document.COLUMN_SIZE,
-            android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED
-        )
-        try {
-            context.contentResolver.query(childrenUri, projection, null, null, null)?.use { cursor ->
-                val idIndex = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_DOCUMENT_ID)
-                val nameIndex = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_DISPLAY_NAME)
-                val mimeIndex = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_MIME_TYPE)
-                val sizeIndex = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_SIZE)
-                val dateIndex = cursor.getColumnIndex(android.provider.DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+    /**
+     * Scans one folder (bucket) instantly: a single MediaStore query filtered by
+     * BUCKET_DISPLAY_NAME returns every video with id/size/date in ONE database call.
+     */
+    fun scanBucket(bucketName: String, relativePath: String) {
+        viewModelScope.launch {
+            _isScanning.value = true
+            _scannedFiles.value = emptyList()
 
-                if (idIndex != -1 && nameIndex != -1 && mimeIndex != -1 && sizeIndex != -1) {
-                    while (cursor.moveToNext()) {
-                        val childId = cursor.getString(idIndex)
-                        val name = cursor.getString(nameIndex) ?: ""
-                        val mimeType = cursor.getString(mimeIndex) ?: ""
-                        val size = cursor.getLong(sizeIndex)
-                        var lastModified = if (dateIndex != -1) cursor.getLong(dateIndex) else 0L
-                        if (lastModified == 0L) {
-                            // O(1) lookup from the preloaded MediaStore map (bulk-queried once)
-                            lastModified = mediaStoreDates[name.lowercase()] ?: 0L
-                        }
-                        if (lastModified == 0L) {
-                            lastModified = System.currentTimeMillis()
-                        }
+            val list = withContext(Dispatchers.IO) {
+                val context = getApplication<Application>()
+                val result = mutableListOf<ScannedFile>()
+                try {
+                    val selection: String
+                    val selectionArgs: Array<String>
+                    // Match by RELATIVE_PATH when available (precise), otherwise by bucket name
+                    if (relativePath.isNotBlank()) {
+                        selection = "${android.provider.MediaStore.Video.VideoColumns.RELATIVE_PATH}=?"
+                        selectionArgs = arrayOf(relativePath)
+                    } else {
+                        selection = "${android.provider.MediaStore.Video.VideoColumns.BUCKET_DISPLAY_NAME}=?"
+                        selectionArgs = arrayOf(bucketName)
+                    }
 
-                        if (mimeType == android.provider.DocumentsContract.Document.MIME_TYPE_DIR) {
-                            scanDirectoryContract(context, treeUri, childId, list, mediaStoreDates)
-                        } else {
-                            val isMp4 = name.endsWith(".mp4", ignoreCase = true) || 
-                                        (mimeType.contains("video", ignoreCase = true) && !name.endsWith(".gif", ignoreCase = true))
-                            if (isMp4) {
-                                val fileUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, childId)
-                                val scannedFile = ScannedFile(
-                                    uri = fileUri,
-                                    path = null,
+                    context.contentResolver.query(
+                        android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                        arrayOf(
+                            android.provider.MediaStore.Video.VideoColumns._ID,
+                            android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME,
+                            android.provider.MediaStore.Video.VideoColumns.SIZE,
+                            android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED,
+                            android.provider.MediaStore.Video.VideoColumns.DATE_ADDED
+                        ),
+                        selection,
+                        selectionArgs,
+                        "${android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED} DESC"
+                    )?.use { cursor ->
+                        val idIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns._ID)
+                        val nameIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME)
+                        val sizeIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.SIZE)
+                        val modIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
+                        val addIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_ADDED)
+                        while (cursor.moveToNext()) {
+                            val id = cursor.getLong(idIdx)
+                            val name = cursor.getString(nameIdx) ?: continue
+                            val size = if (sizeIdx != -1 && !cursor.isNull(sizeIdx)) cursor.getLong(sizeIdx) else 0L
+                            val lastModified = when {
+                                modIdx != -1 && !cursor.isNull(modIdx) && cursor.getLong(modIdx) > 0 -> cursor.getLong(modIdx) * 1000L
+                                addIdx != -1 && !cursor.isNull(addIdx) && cursor.getLong(addIdx) > 0 -> cursor.getLong(addIdx) * 1000L
+                                else -> System.currentTimeMillis()
+                            }
+                            result.add(
+                                ScannedFile(
+                                    uri = android.content.ContentUris.withAppendedId(
+                                        android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id
+                                    ),
+                                    path = relativePath.ifBlank { null },
                                     name = name,
                                     size = size,
                                     lastModified = lastModified,
                                     isSelected = false
                                 )
-                                list.add(scannedFile)
-                                // Stream scanned files to the UI in batches (avoids O(n^2) updates)
-                                if (list.size % SCAN_EMIT_BATCH_SIZE == 0) {
-                                    _scannedFiles.value = list.toList()
-                                }
-                            }
+                            )
                         }
                     }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error scanning bucket '$bucketName': ${e.message}", e)
                 }
+                result.toList()
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed query for docId $documentId: ${e.message}", e)
+
+            _scannedFiles.value = list
+            _selectedFolderUri.value = null
+            _selectedFolderName.value = "📂 $bucketName (${list.size} videos)"
+            _isScanning.value = false
         }
     }
 

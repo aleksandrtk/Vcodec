@@ -299,12 +299,20 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
     val keepOriginal by viewModel.keepOriginal.collectAsState()
     val sizeEstimates by viewModel.sizeEstimates.collectAsState()
 
-    val openFolderLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
-            viewModel.selectFolder(uri)
-        }
+    var showFolderPicker by remember { mutableStateOf(false) }
+    val folderBuckets by viewModel.folderBuckets.collectAsState()
+    val isLoadingBuckets by viewModel.isLoadingBuckets.collectAsState()
+
+    if (showFolderPicker) {
+        FolderPickerDialog(
+            buckets = folderBuckets,
+            isLoading = isLoadingBuckets,
+            onDismiss = { showFolderPicker = false },
+            onSelect = { bucket ->
+                showFolderPicker = false
+                viewModel.scanBucket(bucket.name, bucket.relativePath)
+            }
+        )
     }
 
     // Returns real writable SAF URIs (not Photo Picker sandbox URIs)
@@ -417,7 +425,10 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                 )
 
                 OutlinedButton(
-                    onClick = { openFolderLauncher.launch(null) },
+                    onClick = {
+                        viewModel.loadFolderBuckets()
+                        showFolderPicker = true
+                    },
                     shape = RoundedCornerShape(12.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, PrimaryCyan.copy(alpha = 0.4f)),
                     modifier = Modifier.fillMaxWidth().height(52.dp)
@@ -529,7 +540,10 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                                     Icon(Icons.Default.PlayArrow, contentDescription = "Add from Gallery", tint = PrimaryCyan)
                                 }
                                 IconButton(
-                                    onClick = { openFolderLauncher.launch(null) },
+                                    onClick = {
+                                        viewModel.loadFolderBuckets()
+                                        showFolderPicker = true
+                                    },
                                     modifier = Modifier.background(PrimaryCyan.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                                 ) {
                                     Icon(Icons.Default.Refresh, contentDescription = "Change Folder", tint = PrimaryCyan)
@@ -1557,6 +1571,89 @@ fun HistoryScreen(viewModel: MainViewModel) {
 }
 
 @Composable
+fun FolderPickerDialog(
+    buckets: List<MainViewModel.FolderBucket>,
+    isLoading: Boolean,
+    onDismiss: () -> Unit,
+    onSelect: (MainViewModel.FolderBucket) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = TextGray) }
+        },
+        containerColor = DarkSurface,
+        titleContentColor = TextWhite,
+        textContentColor = TextGray,
+        title = { Text("Select Folder to Scan", fontWeight = FontWeight.Bold) },
+        text = {
+            if (isLoading) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 24.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    CircularProgressIndicator(color = PrimaryCyan)
+                }
+            } else if (buckets.isEmpty()) {
+                Text("No folders with videos found.", modifier = Modifier.padding(vertical = 16.dp))
+            } else {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 420.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    items(buckets) { bucket ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(LocalAppColors.current.surfaceTransparent)
+                                .clickable { onSelect(bucket) }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Folder,
+                                contentDescription = null,
+                                tint = PrimaryCyan,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    bucket.name,
+                                    color = TextWhite,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (bucket.relativePath.isNotBlank()) {
+                                    Text(
+                                        bucket.relativePath.trim('/'),
+                                        color = TextGray,
+                                        fontSize = 11.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                "${bucket.videoCount} • ${Formatter.formatShortFileSize(LocalContext.current, bucket.totalSizeBytes)}",
+                                color = PrimaryCyan,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    )
+}
+
+@Composable
 fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel: MainViewModel) {
     var isFixing by remember { mutableStateOf(false) }
 
@@ -1643,7 +1740,7 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
 
         // Open the gallery video grid (tiles) to visually verify the file's timeline position
         IconButton(
-            onClick = { openVideoCollectionInGallery(context) },
+            onClick = { openVideoCollectionInGallery(context, task.destUri ?: task.sourceUri) },
             enabled = !isFixing
         ) {
             Icon(
@@ -1655,19 +1752,64 @@ fun HistoryItem(task: TranscodeTask, context: android.content.Context, viewModel
     }
 }
 
-fun openVideoCollectionInGallery(context: android.content.Context) {
+/**
+ * Opens the device gallery app positioned at the given video (the user can navigate
+ * the surrounding timeline from there). Crucially, we resolve the file to its real
+ * MediaStore URI and target known gallery apps EXPLICITLY via setPackage — otherwise
+ * Android shows a generic "open with player" chooser instead of the gallery.
+ */
+fun openVideoCollectionInGallery(context: android.content.Context, uriString: String?) {
+    val mediaUri = resolveMediaStoreVideoUri(context, uriString)
+        ?: android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+
+    // Explicit gallery packages first — avoids the video-player chooser dialog
+    val galleryPackages = listOf(
+        "com.google.android.apps.photos",   // Google Photos
+        "com.sec.android.gallery3d",        // Samsung Gallery
+        "com.miui.gallery",                 // Xiaomi Gallery
+        "com.oneplus.gallery",              // OnePlus Gallery
+        "com.coloros.gallery3d",            // OPPO/Realme Gallery
+        "com.huawei.hidisk"                 // Huawei Gallery fallback
+    )
+    for (pkg in galleryPackages) {
+        try {
+            val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
+                setDataAndType(mediaUri, "video/*")
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                setPackage(pkg)
+            }
+            if (context.packageManager.resolveActivity(intent, 0) != null) {
+                context.startActivity(intent)
+                return
+            }
+        } catch (_: Exception) {
+            // Package missing or blocked — try the next one
+        }
+    }
+
+    // Fallback: generic view intent with the resolved MediaStore URI
     try {
         val intent = android.content.Intent(android.content.Intent.ACTION_VIEW).apply {
-            setDataAndType(
-                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                "video/*"
-            )
+            setDataAndType(mediaUri, "video/*")
             addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
         context.startActivity(intent)
     } catch (e: Exception) {
         android.widget.Toast.makeText(context, "Cannot open gallery: ${e.message}", android.widget.Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** Resolves any stored URI (MediaStore, SAF document, file path) to a real content://media/... video URI. */
+private fun resolveMediaStoreVideoUri(context: android.content.Context, uriString: String?): Uri? {
+    if (uriString.isNullOrBlank()) return null
+    return try {
+        val uri = Uri.parse(uriString)
+        com.vcodec.smartencoder.metadata.MetadataRestorer.resolveToMediaStoreUri(context, uri)
+            ?.takeIf { it.authority == android.provider.MediaStore.AUTHORITY }
+    } catch (e: Exception) {
+        null
     }
 }
 

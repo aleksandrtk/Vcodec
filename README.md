@@ -92,6 +92,10 @@ The interface features three main tabs:
 
 ## 💻 Build & Test Instructions
 
+> **Builds are done via GitHub Actions** — every push produces a signed, installable APK
+> (artifact on the run page; stable releases also publish a GitHub Release).
+> See [docs/09_build_and_deploy.md](docs/09_build_and_deploy.md).
+
 ### Requirements:
 * Android Studio (Koala or newer)
 * JDK 17
