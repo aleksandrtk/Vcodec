@@ -259,9 +259,13 @@ class VideoTranscodeWorker(
                     val isGlExtError = errorMsg.contains("GL_EXT_YUV_target") || 
                                        causeMsg.contains("GL_EXT_YUV_target") ||
                                        errorMsg.contains("Video frame processing error")
+                    // Muxer failures on some devices are caused by HDR metadata the
+                    // encoder/muxer chain can't handle — an SDR retry usually fixes them.
+                    val isMuxerError = errorMsg.contains("mux", ignoreCase = true) ||
+                                       causeMsg.contains("mux", ignoreCase = true)
 
-                    if (isGlExtError) {
-                        Log.w(TAG, "GL_EXT_YUV_target not supported by GPU. Retrying with SDR fallback...")
+                    if (isGlExtError || isMuxerError) {
+                        Log.w(TAG, "Export failed (gl=$isGlExtError, muxer=$isMuxerError). Retrying with SDR fallback...")
                         if (tempFile.exists()) tempFile.delete()
                         
                         // Fallback must use tempFile, since pfd is closed or invalid
@@ -494,7 +498,9 @@ class VideoTranscodeWorker(
                 e.message ?: "Unknown compression exception."
             }
 
-            markTaskFailed(taskId, userFriendlyError)
+            // Append the Media3 error code for diagnosability on user reports
+            val media3ErrorCode = (e as? androidx.media3.transformer.ExportException)?.errorCode?.toString()
+            markTaskFailed(taskId, userFriendlyError + (media3ErrorCode?.let { " [err=$it]" } ?: ""))
             return@withContext Result.failure()
         }
     }
