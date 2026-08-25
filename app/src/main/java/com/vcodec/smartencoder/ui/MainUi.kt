@@ -1762,7 +1762,11 @@ fun openVideoCollectionInGallery(context: android.content.Context, uriString: St
     val mediaUri = resolveMediaStoreVideoUri(context, uriString)
         ?: android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI
 
-    // Explicit gallery packages first — avoids the video-player chooser dialog
+    // Explicit gallery packages first — avoids the video-player chooser dialog.
+    // NOTE: do NOT use PackageManager.resolveActivity() here — on Android 11+ package
+    // visibility filtering makes it return null for every external app unless <queries>
+    // is declared. startActivity() itself is exempt from that filtering, so we just
+    // attempt the launch and catch ActivityNotFoundException.
     val galleryPackages = listOf(
         "com.google.android.apps.photos",   // Google Photos
         "com.sec.android.gallery3d",        // Samsung Gallery
@@ -1779,12 +1783,10 @@ fun openVideoCollectionInGallery(context: android.content.Context, uriString: St
                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 setPackage(pkg)
             }
-            if (context.packageManager.resolveActivity(intent, 0) != null) {
-                context.startActivity(intent)
-                return
-            }
+            context.startActivity(intent)
+            return
         } catch (_: Exception) {
-            // Package missing or blocked — try the next one
+            // Package missing or refused the intent — try the next one
         }
     }
 
