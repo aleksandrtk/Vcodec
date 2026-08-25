@@ -4,6 +4,8 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+val channel = project.findProperty("channel")?.toString() ?: "stable"
+
 android {
     namespace = "com.vcodec.smartencoder"
     compileSdk = 35
@@ -11,10 +13,16 @@ android {
 
     defaultConfig {
         applicationId = "com.vcodec.smartencoder"
+        if (channel == "dev") {
+            applicationIdSuffix = ".dev"
+            manifestPlaceholders["appName"] = "Smart Encoder-dev"
+        } else {
+            manifestPlaceholders["appName"] = "Smart Encoder"
+        }
         minSdk = 26
         targetSdk = 34
         versionCode = 11
-        versionName = "2.7.9"
+        versionName = if (channel == "dev") "2.7.9-dev" else "2.7.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
