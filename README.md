@@ -29,34 +29,39 @@ Video encoding is a computationally intensive process that puts continuous load 
 ## 🌟 Key Features
 
 1. **Smart Bitrate Calculation (CRF Emulation)**:
-   Hardware encoders on Android (`MediaCodec`) do not natively support Constant Rate Factor (CRF). VCodec overcomes this by analyzing the input video complexity and calculating a target Variable Bitrate (VBR) before launching the encoder:
+   Hardware encoders on Android (`MediaCodec`) do not natively support Constant Rate Factor (CRF). VCodec overcomes this by analyzing container parameters (resolution, framerate, HDR flags, codec) and calculating an optimal target Variable Bitrate (VBR) before launching the hardware encoder:
 
-   `Target Bitrate = Base Bitrate(Res, FPS) * C_motion * C_noise * C_hdr`
+   `Target Bitrate = Base Bitrate(Res) * Factor_FPS * Factor_HDR * Discount_Codec`
 
-   * **Base Bitrate**: Determined by the source resolution and framerate (e.g., 12 Mbps for 4K 30fps, 3.8 Mbps for 1080p 30fps).
-   * **C_motion (Motion Complexity Coefficient)**: Scans structural differences between keyframes (I-frames). Low-motion videos (e.g., interviews, presentations) reduce the bitrate by up to 40%, while high-motion videos (sports, action camera footage) increase it to prevent blockiness and pixelation.
-   * **C_noise (Noise & High-Frequency Details)**: Analyzes variance in the high-frequency DCT/FFT domain of selected frames. Increases bitrate in dark, grainy, or complex night scenes to preserve details.
-   * **C_hdr (Color Depth Factor)**: Allocates 25% more bitrate for 10-bit HDR (BT.2020) to avoid color banding and gradient artifacts.
+   * **Base Bitrate**: Baseline for H.265 (12 Mbps for 4K, 4.0 Mbps for 1080p, 2.0 Mbps for 720p).
+   * **FPS Factor**: 1.4x for high frame-rate content (> 40 FPS, 60fps/120fps recordings).
+   * **HDR Factor**: 1.25x for 10-bit HDR (BT.2020 / HLG / PQ) to avoid color gradient banding.
+   * **Codec Discount**: 50% discount for H.264 -> H.265 transcoding, 75% for HEVC recompression.
 
-2. **Absolute Chronological Integrity (Samsung Gallery)**:
-   Standard video compressors reset file dates (`DATE_ADDED`, `DATE_MODIFIED`) to the current time, throwing compressed files to the top of the photo timeline. VCodec implements a **MediaStore Scoped Storage "Delete & Recreate" Strategy**:
-   * Reads original `Date Taken` and custom headers from the source MP4 container.
-   * Transcodes to a temporary file.
-   * Copies all binary headers via native JNI.
-   * Completely deletes the original file and registers a new MediaStore entry with the exact original filename and timestamps, keeping your photo library sorted correctly.
+2. **Absolute Chronological Integrity (2-Phase Transactional Replace)**:
+   Standard video compressors reset file dates, throwing compressed files to the top of the gallery timeline. VCodec implements a **Two-Phase Transactional Replace**:
+   * Reads original `Date Taken`, `DATE_MODIFIED`, and container-level boxes.
+   * Transcodes to a temporary file and verifies data integrity.
+   * Restores MP4 metadata and physical filesystem timestamps via native C++ NDK (`futimens`).
+   * Writes and verifies the replacement MediaStore entry *before* deleting the original source file.
+   * Restores exact MediaStore timestamps upon finalization.
 
-3. **Manual Bitrate Selector (Custom Preset)**:
-   Allows setting a manual target bitrate (from **0.5 Mbps to 30.0 Mbps**) via a slider on the settings panel.
+3. **Active Task Controls & Fault Recovery**:
+   * Pause, resume, and cancel active video encodings directly from the Queue screen.
+   * Automatic recovery resets interrupted tasks to `PENDING` on application restart.
 
-4. **Streamlined Workflows**:
-   * **Pick from Gallery**: Select files from the gallery picker; they are added to the queue and you are redirected to the **Queue** tab for background compression.
-   * **Scan Entire Folder (Interactive Batch)**: Scan a folder, browse the list of files, select specific videos, adjust settings, and add them to the queue manually.
+4. **Manual Bitrate Selector (Custom Preset)**:
+   Allows setting a manual target bitrate (from **0.5 Mbps to 30.0 Mbps**) via a slider.
+
+5. **Streamlined Workflows**:
+   * **Pick from Gallery**: Multi-select videos with real-time size and savings estimation.
+   * **Scan Entire Folder (Interactive Batch)**: Scan entire directories, filter by size (> 100 MB) or hide already compressed files.
 
 ---
 
 ## 🛠️ System Architecture
 
-The project follows Clean Architecture guidelines:
+The project follows Clean Architecture guidelines with modular Jetpack Compose UI:
 
 ```mermaid
 graph TD

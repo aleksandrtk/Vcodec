@@ -26,8 +26,8 @@ jobs:
           fetch-depth: 0
 
       # Channel resolution:
-      #   push to main / tag push -> stable
-      #   push to any other branch -> dev (testable APK on every fix)
+      #   push to main / tag push -> stable (VCodec-vX.Y.Z-stable.apk)
+      #   push to feature/* or any other branch -> dev (VCodec-vX.Y.Z-dev.apk)
       - name: Determine channel & version
         id: meta
         run: |
@@ -49,6 +49,7 @@ jobs:
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "suffix=$VERSION-$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "apk_name=VCodec-v$VERSION-$CHANNEL.apk" >> "$GITHUB_OUTPUT"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v5
@@ -97,11 +98,11 @@ jobs:
       - name: Prepare APK artifact
         run: |
           mkdir -p release_assets
-          SUFFIX="${{ steps.meta.outputs.suffix }}"
-          cp app/build/outputs/apk/release/app-release.apk "release_assets/VCodec-release-${SUFFIX}.apk"
+          APK_NAME="${{ steps.meta.outputs.apk_name }}"
+          cp app/build/outputs/apk/release/app-release.apk "release_assets/${APK_NAME}"
           ls -la release_assets
 
-      # Testable APK is ALWAYS uploaded, on every branch and every push
+      # Testable APK is ALWAYS uploaded as artifact, on every branch and every push
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -164,17 +165,30 @@ jobs:
             --title "CI build failure (${GITHUB_SHA::7})" \
             --body-file "$BODY" || true
 
-      # Stable release is published when pushing to main, pushing a tag,
-      # or manual dispatch with a tag. Re-publishing the same tag updates
-      # the existing release with fresh APKs.
-      - name: Create GitHub Release & Upload APK
-        if: ${{ steps.meta.outputs.channel == 'stable' && steps.meta.outputs.tag != '' || github.ref_name == 'main' }}
+      # Stable release on main or tag
+      - name: Create Stable GitHub Release
+        if: ${{ steps.meta.outputs.channel == 'stable' && (steps.meta.outputs.tag != '' || github.ref_name == 'main') }}
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.meta.outputs.tag != '' && steps.meta.outputs.tag || format('v{0}', steps.meta.outputs.version) }}
-          name: "VCodec v${{ steps.meta.outputs.version }} (${{ steps.meta.outputs.channel }})"
+          name: "VCodec v${{ steps.meta.outputs.version }} (stable)"
           draft: false
           prerelease: false
+          generate_release_notes: true
+          files: |
+            release_assets/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Dev pre-release on feature branches (starts with feature/ or manual dispatch)
+      - name: Create Dev GitHub Pre-Release
+        if: ${{ steps.meta.outputs.channel == 'dev' && (startsWith(github.ref_name, 'feature') || steps.meta.outputs.tag != '') }}
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ steps.meta.outputs.tag != '' && steps.meta.outputs.tag || format('v{0}-dev', steps.meta.outputs.version) }}
+          name: "VCodec v${{ steps.meta.outputs.version }} (dev)"
+          draft: false
+          prerelease: true
           generate_release_notes: true
           files: |
             release_assets/*.apk

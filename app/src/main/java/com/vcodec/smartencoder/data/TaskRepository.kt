@@ -40,6 +40,10 @@ class TaskRepository(private val context: Context) {
         }
     }
 
+    suspend fun resetStuckTasks() {
+        taskDao.resetStuckProcessingTasks()
+    }
+
     suspend fun resumeTask(taskId: Long) {
         val task = taskDao.getTaskById(taskId)
         if (task != null && task.status == TaskStatus.PAUSED) {

@@ -28,6 +28,10 @@ android {
         }
     }
 
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     signingConfigs {
         // CI release signing: stable keystore provided via env vars (GitHub Secrets).
         // Falls back to the debug key for local development.

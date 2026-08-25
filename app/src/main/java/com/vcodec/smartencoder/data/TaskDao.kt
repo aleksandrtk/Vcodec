@@ -13,6 +13,12 @@ interface TaskDao {
     @Query("SELECT * FROM transcode_tasks ORDER BY addedTimestamp ASC")
     fun getAllTasksFlow(): Flow<List<TranscodeTask>>
 
+    @Query("SELECT * FROM transcode_tasks")
+    suspend fun getAllTasks(): List<TranscodeTask>
+
+    @Query("UPDATE transcode_tasks SET status = 'PENDING', progress = 0.0 WHERE status IN ('PROCESSING', 'ANALYZING')")
+    suspend fun resetStuckProcessingTasks()
+
     @Query("SELECT * FROM transcode_tasks WHERE id = :id")
     suspend fun getTaskById(id: Long): TranscodeTask?
 
