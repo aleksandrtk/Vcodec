@@ -35,6 +35,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
          */
         fun passesSizeFilter(sizeBytes: Long, onlyLargeFiles: Boolean): Boolean =
             !onlyLargeFiles || sizeBytes <= 0L || sizeBytes > LARGE_FILE_THRESHOLD_BYTES
+
+        private const val COMPRESSED_SUFFIX = "_compressed"
+
+        /** Returns the base name WITHOUT the "_compressed" suffix, or null if not a compressed copy. */
+        fun compressedBaseOf(name: String): String? {
+            val dot = name.lastIndexOf('.')
+            if (dot <= 0) return null
+            val base = name.substring(0, dot)
+            return if (base.endsWith(COMPRESSED_SUFFIX, ignoreCase = true)) {
+                base.dropLast(COMPRESSED_SUFFIX.length)
+            } else null
+        }
     }
 
     private val repository = TaskRepository(application)
@@ -69,8 +81,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _onlyLargeFiles.value = enabled
     }
 
-    val scannedFiles: StateFlow<List<ScannedFile>> = combine(_scannedFiles, _sortOrder, _onlyLargeFiles) { files, order, onlyLarge ->
-        val filtered = if (onlyLarge) files.filter { passesSizeFilter(it.size, true) } else files
+    /** When on, files that already have a "_compressed" copy (or are one) are hidden. */
+    private val _ignoreCompressed = MutableStateFlow(true)
+    val ignoreCompressed: StateFlow<Boolean> = _ignoreCompressed.asStateFlow()
+
+    fun setIgnoreCompressed(enabled: Boolean) {
+        _ignoreCompressed.value = enabled
+    }
+
+    val scannedFiles: StateFlow<List<ScannedFile>> = combine(
+        _scannedFiles, _sortOrder, _onlyLargeFiles, _ignoreCompressed
+    ) { files, order, onlyLarge, ignoreCompressed ->
+        var filtered = if (onlyLarge) files.filter { passesSizeFilter(it.size, true) } else files
+        if (ignoreCompressed) {
+            // Names of the ORIGINALS that already have a "<base>_compressed.<ext>" twin
+            val originalsWithTwin = HashSet<String>()
+            for (f in files) {
+                val base = compressedBaseOf(f.name)
+                if (base != null && base.isNotEmpty()) {
+                    val ext = f.name.substringAfterLast('.', "")
+                    originalsWithTwin.add("${base}.${ext}".lowercase())
+                }
+            }
+            filtered = filtered.filter { f ->
+                compressedBaseOf(f.name) == null && f.name.lowercase() !in originalsWithTwin
+            }
+        }
         when (order) {
             SortOrder.NAME_ASC -> filtered.sortedBy { it.name.lowercase() }
             SortOrder.NAME_DESC -> filtered.sortedByDescending { it.name.lowercase() }

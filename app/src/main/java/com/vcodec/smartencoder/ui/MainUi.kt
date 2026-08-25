@@ -863,24 +863,38 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                     }
                 }
 
-                // Item 3: Large-file filter + Select all / Clear all
+                // Item 3: Filters (ignore compressed / large files) + Select all / Clear all
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        FilterChip(
-                            selected = onlyLargeFiles,
-                            onClick = { viewModel.setOnlyLargeFiles(!onlyLargeFiles) },
-                            label = { Text("> 100 MB", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                containerColor = DarkSurface,
-                                selectedContainerColor = PrimaryCyan.copy(alpha = 0.2f),
-                                selectedLabelColor = PrimaryCyan,
-                                labelColor = TextGray
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            val ignoreCompressed by viewModel.ignoreCompressed.collectAsState()
+                            FilterChip(
+                                selected = ignoreCompressed,
+                                onClick = { viewModel.setIgnoreCompressed(!ignoreCompressed) },
+                                label = { Text("Hide compressed", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = DarkSurface,
+                                    selectedContainerColor = AccentEmerald.copy(alpha = 0.2f),
+                                    selectedLabelColor = AccentEmerald,
+                                    labelColor = TextGray
+                                )
                             )
-                        )
+                            FilterChip(
+                                selected = onlyLargeFiles,
+                                onClick = { viewModel.setOnlyLargeFiles(!onlyLargeFiles) },
+                                label = { Text("> 100 MB", fontWeight = FontWeight.Bold, fontSize = 12.sp) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    containerColor = DarkSurface,
+                                    selectedContainerColor = PrimaryCyan.copy(alpha = 0.2f),
+                                    selectedLabelColor = PrimaryCyan,
+                                    labelColor = TextGray
+                                )
+                            )
+                        }
                         Row {
                             TextButton(onClick = { viewModel.toggleAllFilesSelection(true) }) {
                                 Text("Select All", color = PrimaryCyan)
