@@ -36,6 +36,11 @@ object VideoTranscoder {
     /**
      * Suspendable function that encodes a video using Media3 Transformer.
      * Yields progress updates via standard listener and handles cancellation.
+     *
+     * Device-compat fallback: some chipsets (notably older Samsung Exynos/Snapdragon,
+     * e.g. Galaxy S21) have buggy platform MediaMuxer implementations that fail with
+     * "Muxer failed". On ANY export failure the export is retried once with Media3's
+     * in-app MP4 muxer, which bypasses the platform muxer entirely.
      */
     suspend fun transcodeVideo(
         context: Context,
@@ -51,6 +56,54 @@ object VideoTranscoder {
         forceSdr: Boolean = false,
         listener: ProgressListener
     ): Boolean {
+        try {
+            return startAndAwaitExport(
+                context, inputUri, outputPath, targetVideoBitrate, targetCodec,
+                targetWidth, targetHeight, originalWidth, originalHeight,
+                isHdr, forceSdr, listener, useInAppMuxer = false
+            )
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "Export failed (${e.message}). Retrying with InAppMp4Muxer...")
+            return try {
+                val success = startAndAwaitExport(
+                    context, inputUri, outputPath, targetVideoBitrate, targetCodec,
+                    targetWidth, targetHeight, originalWidth, originalHeight,
+                    isHdr, forceSdr, listener, useInAppMuxer = true
+                )
+                Log.i(TAG, "Retry with InAppMp4Muxer succeeded.")
+                success
+            } catch (retryError: kotlinx.coroutines.CancellationException) {
+                throw retryError
+            } catch (retryError: Exception) {
+                Log.e(TAG, "Retry with InAppMp4Muxer also failed: ${retryError.message}")
+                throw e // Surface the ORIGINAL error to the caller
+            }
+        }
+    }
+
+    private suspend fun startAndAwaitExport(
+        context: Context,
+        inputUri: Uri,
+        outputPath: String,
+        targetVideoBitrate: Int,
+        targetCodec: String,
+        targetWidth: Int,
+        targetHeight: Int,
+        originalWidth: Int,
+        originalHeight: Int,
+        isHdr: Boolean,
+        forceSdr: Boolean,
+        listener: ProgressListener,
+        useInAppMuxer: Boolean
+    ): Boolean {
+        // Remove stale partial output from a previous failed attempt (never touch fd paths)
+        if (!outputPath.startsWith("/proc/")) {
+            val staleOut = File(outputPath)
+            if (staleOut.exists()) staleOut.delete()
+        }
+
         val deferredResult = CompletableDeferred<Boolean>()
 
         val videoMimeType = if (targetCodec.equals("H264", ignoreCase = true)) {
@@ -59,7 +112,8 @@ object VideoTranscoder {
             MimeTypes.VIDEO_H265
         }
 
-        Log.i(TAG, "Starting transcode to $videoMimeType with target bitrate $targetVideoBitrate bps")
+        Log.i(TAG, "Starting transcode to $videoMimeType with target bitrate $targetVideoBitrate bps" +
+            if (useInAppMuxer) " [in-app muxer]" else "")
 
         // 1. (Removed TransformationRequest, set directly on Transformer)
 
@@ -94,12 +148,18 @@ object VideoTranscoder {
         }
 
         mainHandler.post {
-            transformer = Transformer.Builder(context)
+            val builder = Transformer.Builder(context)
                 .setEncoderFactory(encoderFactory)
                 .setVideoMimeType(videoMimeType)
                 .setAudioMimeType(MimeTypes.AUDIO_AAC)
                 .addListener(transformerListener)
-                .build()
+
+            if (useInAppMuxer) {
+                // Bypasses the device's MediaMuxer ("Muxer failed" workaround)
+                builder.setMuxerFactory(androidx.media3.transformer.InAppMp4Muxer.Factory())
+            }
+
+            transformer = builder.build()
 
             val mediaItem = MediaItem.fromUri(inputUri)
 
@@ -115,12 +175,12 @@ object VideoTranscoder {
                 videoEffects.add(presentation)
             }
 
-            val builder = EditedMediaItem.Builder(mediaItem)
+            val editedItemBuilder = EditedMediaItem.Builder(mediaItem)
             if (videoEffects.isNotEmpty()) {
                 val effects = Effects(emptyList(), videoEffects)
-                builder.setEffects(effects)
+                editedItemBuilder.setEffects(effects)
             }
-            val editedMediaItem = builder.build()
+            val editedMediaItem = editedItemBuilder.build()
 
             val sequence = EditedMediaItemSequence(listOf(editedMediaItem))
             val compositionBuilder = Composition.Builder(listOf(sequence))
