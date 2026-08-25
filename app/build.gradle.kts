@@ -6,7 +6,7 @@ plugins {
 
 android {
     namespace = "com.vcodec.smartencoder"
-    compileSdk = 34
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.vcodec.smartencoder"
