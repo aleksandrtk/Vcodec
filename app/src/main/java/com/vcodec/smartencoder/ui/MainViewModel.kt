@@ -84,6 +84,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning.asStateFlow()
 
+    /** Last folder scan (bucket name + relative path) so Refresh can re-run it. */
+    private var lastBucketScan: Pair<String, String>? = null
+
     private val _selectedFolderUri = MutableStateFlow<Uri?>(null)
     val selectedFolderUri: StateFlow<Uri?> = _selectedFolderUri.asStateFlow()
 
@@ -174,6 +177,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * BUCKET_DISPLAY_NAME returns every video with id/size/date in ONE database call.
      */
     fun scanBucket(bucketName: String, relativePath: String) {
+        lastBucketScan = bucketName to relativePath
         viewModelScope.launch {
             _isScanning.value = true
             _scannedFiles.value = emptyList()
@@ -260,6 +264,82 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (passesSizeFilter(it.size, onlyLarge)) it.copy(isSelected = selected) else it
         }
         _scannedFiles.value = current
+    }
+
+    /**
+     * Refresh button: re-syncs the scanner list with reality.
+     * - If a folder was scanned, the folder scan is simply re-run (picks up new
+     *   compressed copies and removes deleted files).
+     * - Otherwise (gallery picks), each file is re-validated against MediaStore in ONE
+     *   bulk query: sizes/dates are updated and missing (deleted/replaced) files dropped.
+     */
+    fun refreshScan() {
+        val bucket = lastBucketScan
+        if (bucket != null) {
+            scanBucket(bucket.first, bucket.second)
+        } else {
+            viewModelScope.launch {
+                _isScanning.value = true
+                val fresh = withContext(Dispatchers.IO) {
+                    revalidateScannedFiles(getApplication(), _scannedFiles.value)
+                }
+                _scannedFiles.value = fresh
+                _isScanning.value = false
+            }
+        }
+    }
+
+    private fun revalidateScannedFiles(context: Context, files: List<ScannedFile>): List<ScannedFile> {
+        if (files.isEmpty()) return files
+
+        // Collect MediaStore ids from content URIs
+        data class Info(val size: Long, val dateMs: Long)
+        val ids = LinkedHashMap<Long, Int>() // id -> index in files
+        files.forEachIndexed { idx, f ->
+            f.uri.lastPathSegment?.toLongOrNull()?.let { ids[it] = idx }
+        }
+
+        val freshInfo = HashMap<Long, Info>()
+        try {
+            context.contentResolver.query(
+                android.provider.MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(
+                    android.provider.MediaStore.Video.VideoColumns._ID,
+                    android.provider.MediaStore.Video.VideoColumns.SIZE,
+                    android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED
+                ),
+                "${android.provider.MediaStore.Video.VideoColumns._ID} IN (${ids.keys.joinToString(",")})",
+                null, null
+            )?.use { cursor ->
+                val idIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns._ID)
+                val sizeIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.SIZE)
+                val dateIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
+                while (cursor.moveToNext()) {
+                    freshInfo[cursor.getLong(idIdx)] = Info(
+                        size = if (sizeIdx != -1 && !cursor.isNull(sizeIdx)) cursor.getLong(sizeIdx) else 0L,
+                        dateMs = if (dateIdx != -1 && !cursor.isNull(dateIdx)) cursor.getLong(dateIdx) * 1000L else 0L
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Refresh validation query failed: ${e.message}")
+            return files // keep old list on error rather than wiping it
+        }
+
+        return files.mapNotNull { file ->
+            val info = file.uri.lastPathSegment?.toLongOrNull()?.let { freshInfo[it] }
+            when {
+                // File no longer exists (deleted / replaced by compression) -> drop it
+                ids.containsKey(file.uri.lastPathSegment?.toLongOrNull()) && info == null -> null
+                // Still there -> refresh size/date
+                info != null -> file.copy(
+                    size = info.size.takeIf { it > 0 } ?: file.size,
+                    lastModified = info.dateMs.takeIf { it > 0 } ?: file.lastModified
+                )
+                // Non-MediaStore URI (SAF/picker) — can't validate, keep as-is
+                else -> file
+            }
+        }
     }
 
     // Transcode parameters state

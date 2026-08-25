@@ -539,6 +539,12 @@ fun ScannerScreen(viewModel: MainViewModel, onNavigateToQueue: () -> Unit) {
                             }
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 IconButton(
+                                    onClick = { viewModel.refreshScan() },
+                                    modifier = Modifier.background(AccentEmerald.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                                ) {
+                                    Icon(Icons.Default.Refresh, contentDescription = "Refresh Scan", tint = AccentEmerald)
+                                }
+                                IconButton(
                                     onClick = { pickVideosLauncher.launch(Unit) },
                                     modifier = Modifier.background(PrimaryCyan.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
                                 ) {
