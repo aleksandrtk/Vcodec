@@ -1707,11 +1707,24 @@ private data class TimelineVideo(val id: Long, val name: String, val dateMs: Lon
 fun LocateInTimelineDialog(task: TranscodeTask, onDismiss: () -> Unit) {
     val context = LocalContext.current
     var videos by remember { mutableStateOf<List<TimelineVideo>?>(null) }
+    var targetPositionLabel by remember { mutableStateOf<String?>(null) }
 
-    // Resolve target MediaStore id from destUri/sourceUri (content://media/external/video/media/<id>)
+    // Resolve the real MediaStore id of the compressed file (handles MediaStore,
+    // SAF document and file-path URIs)
     val targetId = remember(task) {
         sequenceOf(task.destUri, task.sourceUri).filterNotNull()
-            .mapNotNull { Uri.parse(it).lastPathSegment?.toLongOrNull() }
+            .mapNotNull { uriStr ->
+                try {
+                    val uri = Uri.parse(uriStr)
+                    com.vcodec.smartencoder.metadata.MetadataRestorer
+                        .resolveToMediaStoreUri(context, uri)
+                        ?.takeIf { it.authority == android.provider.MediaStore.AUTHORITY }
+                        ?.lastPathSegment?.toLongOrNull()
+                        ?: uri.lastPathSegment?.toLongOrNull()
+                } catch (_: Exception) {
+                    null
+                }
+            }
             .firstOrNull()
     }
     val targetName = task.fileName.lowercase()
@@ -1733,7 +1746,7 @@ fun LocateInTimelineDialog(task: TranscodeTask, onDismiss: () -> Unit) {
                     val nameIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DISPLAY_NAME)
                     val dateIdx = cursor.getColumnIndex(android.provider.MediaStore.Video.VideoColumns.DATE_MODIFIED)
                     buildList {
-                        while (cursor.moveToNext() && size < 600) {
+                        while (cursor.moveToNext()) {
                             add(
                                 TimelineVideo(
                                     id = cursor.getLong(idIdx),
@@ -1763,9 +1776,9 @@ fun LocateInTimelineDialog(task: TranscodeTask, onDismiss: () -> Unit) {
             Column {
                 Text("Position in Gallery", fontWeight = FontWeight.Bold)
                 Text(
-                    "Newest first \u2022 highlighted = ${task.fileName}",
+                    targetPositionLabel ?: "Newest first \u2022 looking for ${task.fileName}",
                     fontSize = 11.sp,
-                    color = TextGray,
+                    color = AccentEmerald.takeIf { targetPositionLabel != null } ?: TextGray,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1781,14 +1794,18 @@ fun LocateInTimelineDialog(task: TranscodeTask, onDismiss: () -> Unit) {
                 else -> {
                     val list = videos!!
                     val targetIndex = list.indexOfFirst { v ->
-                        v.id == targetId || (targetId == null && v.name.lowercase() == targetName)
+                        v.id == targetId ||
+                            v.name.lowercase() == targetName ||
+                            v.name.lowercase().startsWith(targetName.removeSuffix(".mp4"))
                     }
                     val gridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
 
-                    // Auto-scroll so the target tile is visible near the top
+                    // Auto-scroll so the highlighted target tile is at the top of the viewport
                     LaunchedEffect(list) {
-                        if (targetIndex > 0) {
-                            gridState.scrollToItem((targetIndex - 3).coerceAtLeast(0))
+                        if (targetIndex >= 0) {
+                            targetPositionLabel =
+                                "Position ${targetIndex + 1} of ${list.size} newest"
+                            gridState.scrollToItem(targetIndex)
                         }
                     }
 
@@ -1828,6 +1845,17 @@ fun LocateInTimelineDialog(task: TranscodeTask, onDismiss: () -> Unit) {
                                                 .align(Alignment.TopEnd)
                                                 .padding(4.dp)
                                                 .size(18.dp)
+                                        )
+                                        Text(
+                                            "THIS FILE",
+                                            color = Color.Black,
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Black,
+                                            modifier = Modifier
+                                                .align(Alignment.BottomStart)
+                                                .padding(3.dp)
+                                                .background(AccentEmerald, RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 5.dp, vertical = 1.dp)
                                         )
                                     }
                                 }
