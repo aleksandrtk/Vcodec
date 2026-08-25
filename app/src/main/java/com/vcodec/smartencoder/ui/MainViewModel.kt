@@ -672,8 +672,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteTask(taskId: Long) = viewModelScope.launch { repository.deleteTask(taskId) }
 
-    fun clearCompleted() = viewModelScope.launch { repository.clearCompleted() }
-
     fun fixAllCompletedTasksDates(onResult: (successCount: Int, failedCount: Int) -> Unit) {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {

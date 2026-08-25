@@ -34,8 +34,8 @@ interface TaskDao {
     @Delete
     suspend fun deleteTask(task: TranscodeTask)
 
-    @Query("DELETE FROM transcode_tasks WHERE status = 'COMPLETED'")
-    suspend fun clearCompletedTasks()
+    // NOTE: no clearCompletedTasks() — completed tasks are the permanent
+    // Savings & History record and must never be bulk-deleted.
 
     @Query("SELECT SUM(originalSize - compressedSize) FROM transcode_tasks WHERE status = 'COMPLETED'")
     fun getTotalSpaceSavedFlow(): Flow<Long?>

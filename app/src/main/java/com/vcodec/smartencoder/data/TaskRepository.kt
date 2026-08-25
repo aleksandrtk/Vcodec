@@ -55,10 +55,6 @@ class TaskRepository(private val context: Context) {
         }
     }
 
-    suspend fun clearCompleted() {
-        taskDao.clearCompletedTasks()
-    }
-
     fun triggerQueueWorker(taskId: Long?) {
         val dataBuilder = Data.Builder()
         if (taskId != null) {

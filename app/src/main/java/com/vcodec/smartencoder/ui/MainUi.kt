@@ -1102,11 +1102,9 @@ fun QueueScreen(viewModel: MainViewModel) {
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
-            if (tasks.any { it.status == TaskStatus.COMPLETED }) {
-                TextButton(onClick = { viewModel.clearCompleted() }) {
-                    Text("Clear Completed", color = TextGray)
-                }
-            }
+            // NOTE: no "Clear Completed" here on purpose — completed tasks are the
+            // permanent Savings & History record (total space saved). Deleting them
+            // would wipe the user's compression stats.
         }
 
         if (pendingTasks.isEmpty() && activeTask == null) {
